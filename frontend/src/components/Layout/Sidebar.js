@@ -12,7 +12,8 @@ import {
   DesktopOutlined,
   CloudOutlined,
   GlobalOutlined,
-  AlertOutlined  
+  AlertOutlined,
+  CodeOutlined  
 } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -31,7 +32,7 @@ const Sidebar = ({ currentPage, onPageChange }) => {
       key: 'url-monitoring',
       icon: <GlobalOutlined />,
       label: 'URL Monitoring',
-    },
+    },    
   ];
 
   const serverModeItems = [
@@ -102,6 +103,11 @@ const Sidebar = ({ currentPage, onPageChange }) => {
         key: 'kubernetes-config',
         icon: <SettingOutlined />,
         label: 'Kubernetes Config',
+      },
+      {
+        key: 'script-management',  
+        icon: <CodeOutlined  />,
+        label: 'Script Management',
       },
     );
   }
