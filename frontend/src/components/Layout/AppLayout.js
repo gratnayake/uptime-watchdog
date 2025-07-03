@@ -17,7 +17,7 @@ import UrlMonitoring from '../Urls/UrlMonitoring';
 import KubernetesConfig from '../Kubernetes/KubernetesConfig';
 import { useMode } from '../../contexts/ModeContext'; 
 import DbSizeThreshold from '../Thresholds/DbSizeThreshold';
-import SimpleScriptManager from '../Scripts/SimpleScriptManager';
+import ScriptManagement from '../Scripts/ScriptManagement';
 
 
 const { Content, Footer } = Layout;
@@ -78,7 +78,7 @@ const AppLayout = () => {
       case 'threshold-config':
         return isAdmin ? <DbSizeThreshold /> : <RealtimeDashboard />;
       case 'script-manager':
-        return <SimpleScriptManager />;
+        return <ScriptManagement />;
       default:
         return <RealtimeDashboard />;
     }
