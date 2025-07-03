@@ -1235,6 +1235,137 @@ app.post('/api/validate-script-path', (req, res) => {
   }
 });
 
+
+// DATABASE OPERATION ROUTES
+app.post('/api/database/shutdown', async (req, res) => {
+  try {
+    const { mode = 'immediate' } = req.body;
+    
+    console.log(`🔄 Database shutdown request - mode: ${mode}`);
+    
+    const result = await scriptService.executeDatabaseShutdown(mode);
+    
+    if (result.success) {
+      console.log('✅ Database shutdown completed');
+      res.json({ 
+        success: true, 
+        message: 'Database shutdown completed successfully',
+        output: result.output,
+        executedAt: result.executedAt
+      });
+    } else {
+      console.log('❌ Database shutdown failed');
+      res.status(400).json({ 
+        success: false,
+        error: 'Database shutdown failed',
+        output: result.output,
+        details: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Database shutdown error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+app.post('/api/database/startup', async (req, res) => {
+  try {
+    const { mode = 'open' } = req.body;
+    
+    console.log(`🔄 Database startup request - mode: ${mode}`);
+    
+    const result = await scriptService.executeDatabaseStartup(mode);
+    
+    if (result.success) {
+      console.log('✅ Database startup completed');
+      res.json({ 
+        success: true, 
+        message: 'Database startup completed successfully',
+        output: result.output,
+        executedAt: result.executedAt
+      });
+    } else {
+      console.log('❌ Database startup failed');
+      res.status(400).json({ 
+        success: false,
+        error: 'Database startup failed',
+        output: result.output,
+        details: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Database startup error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Check if database operations are available
+app.get('/api/database/operations/status', (req, res) => {
+  try {
+    const dbConfig = dbConfigService.getConfig();
+    
+    res.json({
+      success: true,
+      data: {
+        databaseConfigured: dbConfig.isConfigured,
+        operationsAvailable: dbConfig.isConfigured,
+        supportedOperations: [
+          {
+            operation: 'shutdown',
+            modes: ['immediate', 'normal', 'abort'],
+            description: 'Shutdown Oracle database'
+          },
+          {
+            operation: 'startup',
+            modes: ['open', 'mount', 'nomount'], 
+            description: 'Startup Oracle database'
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get database operation history/logs
+app.get('/api/database/operations/history', (req, res) => {
+  try {
+    // Get all scripts and filter for database operations
+    const scripts = scriptService.getAllScripts();
+    const dbOperations = scripts.filter(script => 
+      script.type === 'database' && 
+      (script.scriptPath === 'ORACLE_DB_SHUTDOWN' || script.scriptPath === 'ORACLE_DB_STARTUP')
+    );
+    
+    const history = dbOperations.map(script => ({
+      id: script.id,
+      operation: script.scriptPath.replace('ORACLE_DB_', '').toLowerCase(),
+      mode: script.arguments || 'default',
+      lastRunAt: script.lastRunAt,
+      lastStatus: script.lastStatus,
+      name: script.name
+    }));
+    
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
+
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('💥 Unhandled error:', err);

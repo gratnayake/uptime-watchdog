@@ -1,315 +1,327 @@
-// Add this component to your SimpleScriptManager
-// Update your SimpleScriptManager.js to include Kubernetes status
-
+// frontend/src/components/Scripts/ScriptManagement.js - ENHANCED VERSION
 import React, { useState, useEffect } from 'react';
-import { 
-  Card, 
-  Button, 
-  Space, 
-  Typography, 
-  message,
-  Modal,
-  Input,
-  Alert,
+import {
+  Card,
   Table,
+  Button,
+  Modal,
+  Form,
+  Input,
+  Space,
+  Typography,
+  Alert,
   Tag,
-  Row,
-  Col,
+  Tooltip,
   Select,
-  Tooltip
+  Divider,
+  notification
 } from 'antd';
-import { 
-  PlayCircleOutlined, 
-  PlusOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  ReloadOutlined,
+import {
+  PlayCircleOutlined,
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
   FileTextOutlined,
-  CodeOutlined,
   FolderOpenOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
+  CodeOutlined,
+  DatabaseOutlined,
+  DesktopOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
+import axios from 'axios';
 
-const { Title, Text } = Typography;
+const { Text, Title } = Typography;
+const { TextArea } = Input;
 const { Option } = Select;
 
-const SimpleScriptManager = () => {
+const ScriptManagement = () => {
   const [scripts, setScripts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingScript, setEditingScript] = useState(null);
-  const [outputModal, setOutputModal] = useState({ visible: false, script: null, output: '', loading: false });
-  const [kubeStatus, setKubeStatus] = useState(null); // New state for Kubernetes status
   const [form, setForm] = useState({
     name: '',
     description: '',
     scriptPath: '',
-    arguments: ''
+    arguments: '',
+    type: 'system'
+  });
+  const [outputModal, setOutputModal] = useState({
+    visible: false,
+    script: null,
+    output: '',
+    loading: false
   });
 
-  // Predefined common arguments for MTCTL
-  const commonArguments = [
-    { label: 'Help', value: '--help', description: 'Show help information' },
-    { label: 'Version', value: '--version', description: 'Show version information' },
-    { label: 'Stop Namespace', value: 'stop --namespace "tsutst"', description: 'Stop deployments in namespace' },
-    { label: 'Start Namespace', value: 'start --namespace "tsutst"', description: 'Start deployments in namespace' },
-    { label: 'Status Check', value: 'status --namespace "tsutst"', description: 'Check status of namespace' },
-    { label: 'List Deployments', value: 'list --namespace "tsutst"', description: 'List all deployments' },
-    { label: 'Deploy', value: 'deploy --namespace "tsutst"', description: 'Deploy to namespace' }
-  ];
-
   useEffect(() => {
-    loadScripts();
-    checkKubernetesConfig(); // Check Kubernetes config on load
+    fetchScripts();
   }, []);
 
-  // Check Kubernetes configuration status
-  const checkKubernetesConfig = async () => {
+  const fetchScripts = async () => {
+    setLoading(true);
     try {
-      const response = await fetch('http://localhost:5001/api/kubernetes-script-config');
-      const data = await response.json();
-      setKubeStatus(data);
+      const response = await axios.get('/api/scripts');
+      if (response.data.success) {
+        setScripts(response.data.data);
+      }
     } catch (error) {
-      console.error('Failed to check Kubernetes config:', error);
-      setKubeStatus({
-        configured: false,
-        message: 'Unable to check Kubernetes configuration'
+      notification.error({
+        message: 'Error',
+        description: 'Failed to fetch scripts'
       });
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Render Kubernetes status indicator
-  const renderKubernetesStatus = () => {
-    if (!kubeStatus) return null;
-
-    const getStatusProps = () => {
-      if (kubeStatus.configured && kubeStatus.kubeconfigExists) {
-        return {
-          type: "success",
-          icon: <CheckCircleOutlined />,
-          message: "Kubernetes Configuration Ready",
-          description: `KUBECONFIG will be automatically used from: ${kubeStatus.kubeconfigPath}`
-        };
-      } else if (kubeStatus.configured && !kubeStatus.kubeconfigExists) {
-        return {
-          type: "warning", 
-          icon: <ExclamationCircleOutlined />,
-          message: "Kubernetes Configuration Issue",
-          description: `KUBECONFIG file not found: ${kubeStatus.kubeconfigPath}`
-        };
-      } else {
-        return {
-          type: "info",
-          icon: <InfoCircleOutlined />,
-          message: "Kubernetes Not Configured",
-          description: "Scripts will run without KUBECONFIG. Configure in Kubernetes settings if needed."
-        };
-      }
-    };
-
-    const statusProps = getStatusProps();
-
-    return (
-      <Alert
-        {...statusProps}
-        showIcon
-        style={{ marginBottom: 16 }}
-        action={
-          <Button size="small" onClick={checkKubernetesConfig}>
-            Refresh
-          </Button>
-        }
-      />
-    );
+  const handleFormChange = (field, value) => {
+    setForm(prev => ({ ...prev, [field]: value }));
   };
 
-  const loadScripts = () => {
-    try {
-      const saved = localStorage.getItem('simpleScripts');
-      if (saved) {
-        setScripts(JSON.parse(saved));
-      }
-    } catch (error) {
-      console.error('Failed to load scripts:', error);
-    }
-  };
-
-  const saveScripts = (scriptList) => {
-    try {
-      localStorage.setItem('simpleScripts', JSON.stringify(scriptList));
-      setScripts(scriptList);
-    } catch (error) {
-      console.error('Failed to save scripts:', error);
-      message.error('Failed to save scripts');
-    }
-  };
-
-  const executeScript = async (script) => {
-    setOutputModal({ visible: true, script, output: '', loading: true });
-    
-    try {
-      const { simpleScriptAPI } = await import('../../services/api');
-      
-      const result = await simpleScriptAPI.executeScript({
-        name: script.name,
-        scriptPath: script.scriptPath,
-        arguments: script.arguments
+  const handleSaveScript = async () => {
+    if (!form.name || !form.scriptPath) {
+      notification.error({
+        message: 'Validation Error',
+        description: 'Name and script path are required'
       });
-      
-      setOutputModal(prev => ({
-        ...prev,
-        output: result.output,
-        loading: false
-      }));
-      
-      const updatedScripts = scripts.map(s => 
-        s.id === script.id 
-          ? { ...s, lastRun: new Date().toISOString() }
-          : s
-      );
-      saveScripts(updatedScripts);
-      
-      // Show success message with Kubernetes info
-      if (result.kubeconfigUsed) {
-        message.success('Script executed successfully with KUBECONFIG');
-      } else {
-        message.success('Script executed successfully');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const endpoint = editingScript ? `/api/scripts/${editingScript.id}` : '/api/scripts';
+      const method = editingScript ? 'put' : 'post';
+
+      const response = await axios[method](endpoint, {
+        name: form.name,
+        description: form.description,
+        scriptPath: form.scriptPath,
+        arguments: form.arguments,
+        type: form.type
+      });
+
+      if (response.data.success) {
+        notification.success({
+          message: 'Success',
+          description: `Script ${editingScript ? 'updated' : 'created'} successfully`
+        });
+        setModalVisible(false);
+        resetForm();
+        fetchScripts();
       }
     } catch (error) {
-      setOutputModal(prev => ({
-        ...prev,
-        output: `Error executing script: ${error.message}`,
-        loading: false
-      }));
-      message.error(`Script execution failed: ${error.message}`);
+      notification.error({
+        message: 'Error',
+        description: error.response?.data?.error || 'Failed to save script'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleAddScript = () => {
-    setEditingScript(null);
-    setForm({
-      name: '',
-      description: '',
-      scriptPath: '',
-      arguments: ''
+  const handleRunScript = async (script) => {
+    setOutputModal({
+      visible: true,
+      script: script,
+      output: '',
+      loading: true
     });
-    setModalVisible(true);
+
+    try {
+      const response = await axios.post(`/api/scripts/${script.id}/run`);
+      
+      setOutputModal(prev => ({
+        ...prev,
+        output: response.data.output || 'Script completed successfully',
+        loading: false
+      }));
+
+      if (response.data.success) {
+        notification.success({
+          message: 'Script Executed',
+          description: `${script.name} completed successfully`
+        });
+      } else {
+        notification.warning({
+          message: 'Script Completed with Issues',
+          description: `${script.name} completed but may have encountered issues`
+        });
+      }
+
+      // Refresh scripts to update status
+      fetchScripts();
+
+    } catch (error) {
+      setOutputModal(prev => ({
+        ...prev,
+        output: error.response?.data?.output || error.message || 'Script execution failed',
+        loading: false
+      }));
+
+      notification.error({
+        message: 'Execution Error',
+        description: `Failed to execute ${script.name}`
+      });
+    }
   };
 
   const handleEditScript = (script) => {
     setEditingScript(script);
     setForm({
       name: script.name,
-      description: script.description,
+      description: script.description || '',
       scriptPath: script.scriptPath,
-      arguments: script.arguments
+      arguments: script.arguments || '',
+      type: script.type || 'system'
     });
     setModalVisible(true);
   };
 
-  const handleSaveScript = () => {
-    if (!form.name || !form.scriptPath) {
-      message.error('Please fill in script name and path');
-      return;
-    }
-
-    const newScript = {
-      id: editingScript ? editingScript.id : Date.now(),
-      name: form.name,
-      description: form.description,
-      scriptPath: form.scriptPath,
-      arguments: form.arguments,
-      createdAt: editingScript ? editingScript.createdAt : new Date().toISOString(),
-      lastRun: null
-    };
-
-    let updatedScripts;
-    if (editingScript) {
-      updatedScripts = scripts.map(s => s.id === editingScript.id ? newScript : s);
-    } else {
-      updatedScripts = [...scripts, newScript];
-    }
-
-    saveScripts(updatedScripts);
-    setModalVisible(false);
-    message.success(editingScript ? 'Script updated successfully' : 'Script added successfully');
+  const handleDeleteScript = async (scriptId) => {
+    Modal.confirm({
+      title: 'Delete Script',
+      content: 'Are you sure you want to delete this script?',
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const response = await axios.delete(`/api/scripts/${scriptId}`);
+          if (response.data.success) {
+            notification.success({
+              message: 'Success',
+              description: 'Script deleted successfully'
+            });
+            fetchScripts();
+          }
+        } catch (error) {
+          notification.error({
+            message: 'Error',
+            description: 'Failed to delete script'
+          });
+        }
+      }
+    });
   };
 
-  const handleDeleteScript = (scriptId) => {
-    const updatedScripts = scripts.filter(s => s.id !== scriptId);
-    saveScripts(updatedScripts);
-    message.success('Script deleted successfully');
+  const resetForm = () => {
+    setForm({
+      name: '',
+      description: '',
+      scriptPath: '',
+      arguments: '',
+      type: 'system'
+    });
+    setEditingScript(null);
   };
 
-  const handleQuickArgument = (value) => {
-    setForm(prev => ({ ...prev, arguments: value }));
+  const getScriptTypeIcon = (type) => {
+    switch (type) {
+      case 'database':
+        return <DatabaseOutlined style={{ color: '#1890ff' }} />;
+      case 'system':
+        return <DesktopOutlined style={{ color: '#52c41a' }} />;
+      default:
+        return <CodeOutlined style={{ color: '#faad14' }} />;
+    }
+  };
+
+  const getScriptTypeColor = (type) => {
+    switch (type) {
+      case 'database':
+        return 'blue';
+      case 'system':
+        return 'green';
+      default:
+        return 'orange';
+    }
+  };
+
+  const getStatusTag = (status) => {
+    switch (status) {
+      case 'success':
+        return <Tag color="success">Success</Tag>;
+      case 'failed':
+        return <Tag color="error">Failed</Tag>;
+      case 'running':
+        return <Tag color="processing">Running</Tag>;
+      default:
+        return <Tag color="default">Not Run</Tag>;
+    }
+  };
+
+  const isDatabaseScript = (scriptPath) => {
+    return scriptPath === 'ORACLE_DB_SHUTDOWN' || scriptPath === 'ORACLE_DB_STARTUP';
+  };
+
+  const getScriptDescription = (script) => {
+    if (script.scriptPath === 'ORACLE_DB_SHUTDOWN') {
+      return `Oracle Database Shutdown (${script.arguments || 'immediate'} mode)`;
+    }
+    if (script.scriptPath === 'ORACLE_DB_STARTUP') {
+      return `Oracle Database Startup (${script.arguments || 'open'} mode)`;
+    }
+    return script.description || 'No description';
   };
 
   const columns = [
     {
-      title: 'Script Details',
-      key: 'details',
+      title: 'Script',
+      key: 'script',
       render: (_, record) => (
-        <Space direction="vertical" size="small">
+        <Space>
+          {getScriptTypeIcon(record.type)}
           <div>
             <Text strong>{record.name}</Text>
             <br />
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              <FileTextOutlined /> {record.scriptPath}
+              {getScriptDescription(record)}
             </Text>
           </div>
-          {record.description && (
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              {record.description}
-            </Text>
-          )}
         </Space>
       ),
     },
     {
-      title: 'Arguments',
-      dataIndex: 'arguments',
-      key: 'arguments',
-      render: (args) => (
-        args ? (
-          <Tooltip title={args}>
-            <Text code style={{ fontSize: '12px' }}>
-              {args.length > 40 ? `${args.substring(0, 40)}...` : args}
-            </Text>
-          </Tooltip>
-        ) : (
-          <Text type="secondary" style={{ fontSize: '12px' }}>No arguments</Text>
-        )
+      title: 'Type',
+      dataIndex: 'type',
+      key: 'type',
+      width: 100,
+      render: (type) => (
+        <Tag color={getScriptTypeColor(type)}>
+          {type?.toUpperCase() || 'SYSTEM'}
+        </Tag>
       ),
     },
     {
       title: 'Status',
       key: 'status',
-      render: (_, record) => (
-        <Space direction="vertical" size="small">
-          <Tag color="blue">Ready</Tag>
-          {record.lastRun && (
-            <Text type="secondary" style={{ fontSize: '11px' }}>
-              Last run: {new Date(record.lastRun).toLocaleString()}
-            </Text>
-          )}
-        </Space>
-      ),
+      width: 120,
+      render: (_, record) => getStatusTag(record.lastStatus),
+    },
+    {
+      title: 'Last Run',
+      dataIndex: 'lastRunAt',
+      key: 'lastRunAt',
+      width: 180,
+      render: (date) => 
+        date ? new Date(date).toLocaleString() : 'Never',
     },
     {
       title: 'Actions',
       key: 'actions',
+      width: 200,
       render: (_, record) => (
-        <Space size="small">
+        <Space>
           <Tooltip title="Run Script">
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
               size="small"
-              onClick={() => executeScript(record)}
-            />
+              onClick={() => handleRunScript(record)}
+              loading={outputModal.loading && outputModal.script?.id === record.id}
+            >
+              Run
+            </Button>
           </Tooltip>
           <Tooltip title="Edit Script">
             <Button
@@ -337,29 +349,29 @@ const SimpleScriptManager = () => {
         title={
           <Space>
             <CodeOutlined />
-            <Title level={4} style={{ margin: 0 }}>Script Manager</Title>
+            <Title level={4} style={{ margin: 0 }}>Script Management</Title>
           </Space>
         }
         extra={
-          <Space>
-            <Button 
-              icon={<ReloadOutlined />} 
-              onClick={loadScripts}
-            >
-              Refresh
-            </Button>
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />} 
-              onClick={handleAddScript}
-            >
-              Add Script
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              resetForm();
+              setModalVisible(true);
+            }}
+          >
+            Add Script
+          </Button>
         }
       >
-        {/* Kubernetes Status Indicator */}
-        {renderKubernetesStatus()}
+        <Alert
+          message="Script Management Information"
+          description="Manage system scripts and Oracle database operations. Database scripts use Oracle connections configured in Database Config. Scripts run on the server where the backend is hosted."
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
 
         <Table
           columns={columns}
@@ -368,175 +380,275 @@ const SimpleScriptManager = () => {
           pagination={{ pageSize: 10 }}
           rowKey="id"
           locale={{
-            emptyText: 'No scripts configured. Click "Add Script" to get started!'
+            emptyText: 'No scripts configured'
           }}
         />
       </Card>
 
       {/* Add/Edit Script Modal */}
       <Modal
-        title={
-          <Space>
-            {editingScript ? <EditOutlined /> : <PlusOutlined />}
-            {editingScript ? 'Edit Script' : 'Add New Script'}
-          </Space>
-        }
+        title={editingScript ? 'Edit Script' : 'Add New Script'}
         open={modalVisible}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false);
+          resetForm();
+        }}
         onOk={handleSaveScript}
         width={700}
-        okText={editingScript ? 'Update Script' : 'Add Script'}
+        confirmLoading={loading}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {/* Script Name */}
           <div>
-            <Text strong>Script Name *</Text>
-            <Input
-              placeholder="e.g., MTCTL Help, MTCTL Deploy Dev"
-              value={form.name}
-              onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))}
-              style={{ marginTop: 4 }}
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <Text strong>Description</Text>
-            <Input
-              placeholder="Brief description of what this script does"
-              value={form.description}
-              onChange={(e) => setForm(prev => ({ ...prev, description: e.target.value }))}
-              style={{ marginTop: 4 }}
-            />
-          </div>
-
-          {/* Script Path */}
-          <div>
-            <Text strong>Script Path *</Text>
-            <Input
-              placeholder="Full path to your MTCTL script"
-              value={form.scriptPath}
-              onChange={(e) => setForm(prev => ({ ...prev, scriptPath: e.target.value }))}
-              prefix={<FileTextOutlined />}
-              style={{ marginTop: 4 }}
-            />
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              e.g., E:\ifsroot\deliveries\...\mtctl.cmd
-            </Text>
-          </div>
-
-          {/* Quick Arguments */}
-          <div>
-            <Text strong>Quick Arguments</Text>
+            <Text strong>Script Type *</Text>
             <Select
-              placeholder="Select common arguments or type custom ones below"
               style={{ width: '100%', marginTop: 4 }}
-              onSelect={handleQuickArgument}
-              allowClear
+              value={form.type}
+              onChange={(value) => handleFormChange('type', value)}
             >
-              {commonArguments.map((arg, index) => (
-                <Option key={index} value={arg.value}>
-                  <div>
-                    <Text strong>{arg.label}</Text>
-                    <br />
-                    <Text type="secondary" style={{ fontSize: '11px' }}>
-                      {arg.value} - {arg.description}
-                    </Text>
-                  </div>
-                </Option>
-              ))}
+              <Option value="system">
+                <Space>
+                  <DesktopOutlined />
+                  System Script
+                </Space>
+              </Option>
+              <Option value="database">
+                <Space>
+                  <DatabaseOutlined />
+                  Database Operation
+                </Space>
+              </Option>
             </Select>
           </div>
 
-          {/* Custom Arguments */}
           <div>
-            <Text strong>Arguments</Text>
+            <Text strong>Script Name *</Text>
             <Input
-              placeholder="--help, stop --namespace tsutst, etc."
-              value={form.arguments}
-              onChange={(e) => setForm(prev => ({ ...prev, arguments: e.target.value }))}
+              placeholder="e.g., Database Backup, System Cleanup"
+              value={form.name}
+              onChange={(e) => handleFormChange('name', e.target.value)}
               style={{ marginTop: 4 }}
             />
           </div>
 
-          {/* Information Alert */}
-          <Alert
-            message="Automatic Kubernetes Integration"
-            description="Your KUBECONFIG will be automatically applied from your Kubernetes configuration settings. No need to set environment variables manually."
-            type="info"
-            showIcon
-          />
+          <div>
+            <Text strong>Description</Text>
+            <TextArea
+              placeholder="Brief description of what this script does"
+              value={form.description}
+              onChange={(e) => handleFormChange('description', e.target.value)}
+              rows={2}
+              style={{ marginTop: 4 }}
+            />
+          </div>
+
+          {form.type === 'database' ? (
+            <div>
+              <Text strong>Database Operation *</Text>
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={form.scriptPath}
+                onChange={(value) => handleFormChange('scriptPath', value)}
+                placeholder="Select database operation"
+              >
+                <Option value="ORACLE_DB_SHUTDOWN">
+                  <Space>
+                    <DatabaseOutlined />
+                    Oracle Database Shutdown
+                  </Space>
+                </Option>
+                <Option value="ORACLE_DB_STARTUP">
+                  <Space>
+                    <DatabaseOutlined />
+                    Oracle Database Startup
+                  </Space>
+                </Option>
+              </Select>
+            </div>
+          ) : (
+            <div>
+              <Text strong>Script Path *</Text>
+              <Space.Compact style={{ display: 'flex', marginTop: 4 }}>
+                <Input
+                  placeholder="C:\scripts\backup.bat or C:\tools\app.exe"
+                  value={form.scriptPath}
+                  onChange={(e) => handleFormChange('scriptPath', e.target.value)}
+                  style={{ flex: 1 }}
+                  prefix={<FileTextOutlined />}
+                />
+                <input
+                  type="file"
+                  accept=".bat,.cmd,.ps1,.exe,.com"
+                  style={{ display: 'none' }}
+                  ref={(input) => {
+                    if (input) {
+                      input.addEventListener('change', (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          handleFormChange('scriptPath', file.path || file.name);
+                        }
+                      });
+                    }
+                  }}
+                  id="script-file-input"
+                />
+                <Button
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => document.getElementById('script-file-input').click()}
+                  title="Browse for script file"
+                >
+                  Browse
+                </Button>
+              </Space.Compact>
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                Full path to your script file (.bat, .ps1, .exe, etc.) or click Browse to select
+              </Text>
+            </div>
+          )}
+
+          <div>
+            <Text strong>Arguments (Optional)</Text>
+            {form.type === 'database' && form.scriptPath === 'ORACLE_DB_SHUTDOWN' ? (
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={form.arguments || 'immediate'}
+                onChange={(value) => handleFormChange('arguments', value)}
+                placeholder="Select shutdown mode"
+              >
+                <Option value="immediate">IMMEDIATE - Fast shutdown, rollback active transactions</Option>
+                <Option value="normal">NORMAL - Wait for users to disconnect</Option>
+                <Option value="abort">ABORT - Emergency shutdown (not recommended)</Option>
+              </Select>
+            ) : form.type === 'database' && form.scriptPath === 'ORACLE_DB_STARTUP' ? (
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={form.arguments || 'open'}
+                onChange={(value) => handleFormChange('arguments', value)}
+                placeholder="Select startup mode"
+              >
+                <Option value="open">OPEN - Full database startup (recommended)</Option>
+                <Option value="mount">MOUNT - Mount database only</Option>
+                <Option value="nomount">NOMOUNT - Start instance only</Option>
+              </Select>
+            ) : (
+              <Input
+                placeholder="--verbose --output=log.txt"
+                value={form.arguments}
+                onChange={(e) => handleFormChange('arguments', e.target.value)}
+                style={{ marginTop: 4 }}
+              />
+            )}
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              {form.type === 'database' 
+                ? 'Database operation mode/parameters'
+                : 'Command line arguments to pass to the script'
+              }
+            </Text>
+          </div>
+
+          {form.type === 'database' && (
+            <Alert
+              message="Database Operations"
+              description={
+                <div>
+                  <p><strong>Requirements:</strong></p>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    <li>Database must be configured in Database Config</li>
+                    <li>User must have SYSDBA privileges</li>
+                    <li>For shutdown: Database must be running</li>
+                    <li>For startup: Database must be shutdown</li>
+                  </ul>
+                </div>
+              }
+              type="info"
+              showIcon
+              icon={<InfoCircleOutlined />}
+            />
+          )}
+
+          {form.type === 'system' && (
+            <Alert
+              message="Security Note"
+              description="Scripts will run with the permissions of the Node.js process. Ensure your scripts are trusted and secure."
+              type="warning"
+              showIcon
+            />
+          )}
         </Space>
       </Modal>
 
-      {/* Script Output Modal - same as before */}
+      {/* Script Output Modal */}
       <Modal
         title={
           <Space>
-            <CodeOutlined />
+            {outputModal.script?.type === 'database' ? <DatabaseOutlined /> : <CodeOutlined />}
             Script Output: {outputModal.script?.name}
-            <Tag color={outputModal.loading ? 'blue' : 'green'}>
-              {outputModal.loading ? 'Running...' : 'Completed'}
-            </Tag>
           </Space>
         }
         open={outputModal.visible}
         onCancel={() => setOutputModal({ visible: false, script: null, output: '', loading: false })}
         footer={[
-          <Button 
-            key="close" 
-            type="primary"
-            onClick={() => setOutputModal({ visible: false, script: null, output: '', loading: false })}
-          >
+          <Button key="close" onClick={() => setOutputModal({ visible: false, script: null, output: '', loading: false })}>
             Close
           </Button>
         ]}
-        width={800}
+        width={900}
       >
         <div style={{ marginBottom: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Text strong>Script:</Text>
-              <br />
-              <Text code style={{ fontSize: '12px' }}>{outputModal.script?.scriptPath}</Text>
-            </Col>
-            <Col span={12}>
-              <Text strong>Arguments:</Text>
-              <br />
-              <Text code style={{ fontSize: '12px' }}>{outputModal.script?.arguments || 'None'}</Text>
-            </Col>
-          </Row>
-        </div>
-
-        <div>
-          <Text strong>Output:</Text>
-          <div style={{
-            background: '#000',
-            color: '#00ff00',
-            padding: '16px',
-            borderRadius: '6px',
-            fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-            fontSize: '13px',
-            maxHeight: '400px',
-            overflow: 'auto',
-            marginTop: '8px',
-            whiteSpace: 'pre-wrap',
-            border: '1px solid #333'
-          }}>
-            {outputModal.loading ? (
-              <div style={{ textAlign: 'center', padding: '40px' }}>
-                <Text style={{ color: '#00ff00' }}>
-                  ⏳ Executing script... Please wait...
-                </Text>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <div>
+              <Text strong>Script:</Text> <Text code>{outputModal.script?.name}</Text>
+            </div>
+            {outputModal.script?.type === 'database' ? (
+              <div>
+                <Text strong>Operation:</Text> 
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  {outputModal.script?.scriptPath?.replace('ORACLE_DB_', '')} {outputModal.script?.arguments}
+                </Tag>
               </div>
             ) : (
-              outputModal.output || 'No output generated'
+              <>
+                <div>
+                  <Text strong>Path:</Text> <Text code>{outputModal.script?.scriptPath}</Text>
+                </div>
+                {outputModal.script?.arguments && (
+                  <div>
+                    <Text strong>Arguments:</Text> <Text code>{outputModal.script.arguments}</Text>
+                  </div>
+                )}
+              </>
             )}
-          </div>
+          </Space>
+        </div>
+
+        <Divider orientation="left">Output</Divider>
+        <div style={{
+          background: '#1f1f1f',
+          color: '#fff',
+          padding: '16px',
+          borderRadius: '6px',
+          fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+          fontSize: '13px',
+          maxHeight: '400px',
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          lineHeight: '1.4'
+        }}>
+          {outputModal.loading ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#52c41a' }}>
+              <Text style={{ color: '#52c41a' }}>
+                {outputModal.script?.type === 'database' 
+                  ? 'Executing database operation...' 
+                  : 'Running script...'
+                }
+              </Text>
+            </div>
+          ) : (
+            outputModal.output || 'No output'
+          )}
         </div>
       </Modal>
     </div>
   );
 };
 
-export default SimpleScriptManager;
+export default ScriptManagement;

@@ -1,25 +1,18 @@
-// Improved Script Service - backend/services/scriptService.js
+// backend/services/scriptService.js - ENHANCED VERSION
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
-const os = require('os');
+const oracledb = require('oracledb');
+const dbConfigService = require('./dbConfigService');
 
 const execAsync = util.promisify(exec);
 
 class ScriptService {
   constructor() {
     this.scriptsFile = path.join(__dirname, '../data/scripts.json');
-    this.ensureDataDirectory();
     this.ensureScriptsFile();
-  }
-
-  ensureDataDirectory() {
-    const dataDir = path.join(__dirname, '../data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-      console.log('📁 Created data directory');
-    }
+    this.isDbOperationInProgress = false;
   }
 
   ensureScriptsFile() {
@@ -30,8 +23,9 @@ class ScriptService {
             id: 1,
             name: 'System Information',
             description: 'Display basic system information',
-            scriptPath: os.platform() === 'win32' ? 'systeminfo' : 'uname -a',
+            scriptPath: 'systeminfo',
             arguments: '',
+            type: 'system',
             lastRunAt: null,
             lastStatus: null,
             createdAt: new Date().toISOString()
@@ -40,8 +34,31 @@ class ScriptService {
             id: 2,
             name: 'Directory Listing',
             description: 'List current directory contents',
-            scriptPath: os.platform() === 'win32' ? 'dir' : 'ls',
-            arguments: os.platform() === 'win32' ? '/w' : '-la',
+            scriptPath: 'dir',
+            arguments: '/w',
+            type: 'system',
+            lastRunAt: null,
+            lastStatus: null,
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: 3,
+            name: 'Oracle Database Shutdown',
+            description: 'Shutdown Oracle Database with IMMEDIATE mode',
+            scriptPath: 'ORACLE_DB_SHUTDOWN',
+            arguments: 'immediate',
+            type: 'database',
+            lastRunAt: null,
+            lastStatus: null,
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: 4,
+            name: 'Oracle Database Startup',
+            description: 'Startup Oracle Database',
+            scriptPath: 'ORACLE_DB_STARTUP',
+            arguments: 'open',
+            type: 'database',
             lastRunAt: null,
             lastStatus: null,
             createdAt: new Date().toISOString()
@@ -50,7 +67,7 @@ class ScriptService {
         lastUpdated: new Date().toISOString()
       };
       this.saveScripts(defaultScripts);
-      console.log('📜 Created default scripts configuration');
+      console.log('📜 Created default scripts with Oracle DB controls');
     }
   }
 
@@ -89,8 +106,9 @@ class ScriptService {
       id: Date.now(),
       name: scriptData.name,
       description: scriptData.description || '',
-      scriptPath: scriptData.scriptPath.trim(),
+      scriptPath: scriptData.scriptPath,
       arguments: scriptData.arguments || '',
+      type: scriptData.type || 'system',
       lastRunAt: null,
       lastStatus: null,
       createdAt: new Date().toISOString()
@@ -115,8 +133,9 @@ class ScriptService {
       ...data.scripts[scriptIndex],
       name: scriptData.name,
       description: scriptData.description || '',
-      scriptPath: scriptData.scriptPath.trim(),
+      scriptPath: scriptData.scriptPath,
       arguments: scriptData.arguments || '',
+      type: scriptData.type || data.scripts[scriptIndex].type || 'system',
       updatedAt: new Date().toISOString()
     };
     
@@ -136,260 +155,270 @@ class ScriptService {
     return this.saveScripts(data);
   }
 
-  // IMPROVED PATH VALIDATION
-  validateScriptPath(scriptPath) {
+  /**
+   * Oracle Database Shutdown Operation
+   */
+  async executeDatabaseShutdown(mode = 'immediate') {
+    if (this.isDbOperationInProgress) {
+      throw new Error('Database operation already in progress');
+    }
+
+    this.isDbOperationInProgress = true;
+    console.log(`🔄 Starting Oracle database shutdown with mode: ${mode}`);
+
     try {
-      if (!scriptPath || scriptPath.trim() === '') {
-        return { valid: false, error: 'Script path cannot be empty' };
+      // Validate shutdown mode
+      const validModes = ['immediate', 'normal', 'abort'];
+      if (!validModes.includes(mode.toLowerCase())) {
+        throw new Error(`Invalid shutdown mode. Use: ${validModes.join(', ')}`);
       }
 
-      const cleanPath = scriptPath.trim();
-      console.log(`🔍 Validating script path: "${cleanPath}"`);
-
-      // Check for system commands first (don't require file existence)
-      const systemCommands = [
-        'systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping',
-        'whoami', 'hostname', 'date', 'time', 'echo', 'cls', 'type',
-        'ls', 'ps', 'uname', 'df', 'free', 'top', 'cat', 'grep',
-        'python', 'node', 'npm', 'git', 'docker', 'kubectl'
-      ];
-
-      const commandName = cleanPath.split(' ')[0].toLowerCase();
-      const isSystemCommand = systemCommands.includes(commandName) || 
-                             systemCommands.includes(path.basename(commandName, path.extname(commandName)));
-
-      if (isSystemCommand) {
-        console.log(`✅ System command detected: ${commandName}`);
-        return { 
-          valid: true, 
-          message: `System command '${commandName}' is valid`,
-          isSystemCommand: true 
-        };
+      // Get database configuration
+      const config = dbConfigService.getConfig();
+      if (!config.isConfigured) {
+        throw new Error('Database not configured. Please configure database connection first.');
       }
 
-      // For file paths, check if file exists
-      let filePath = cleanPath;
+      console.log('🔗 Connecting to Oracle with SYSDBA privileges...');
+
+      // Create connection with SYSDBA privileges for shutdown
+      const connection = await oracledb.getConnection({
+        user: config.user,
+        password: config.password,
+        connectString: config.connectString,
+        privilege: oracledb.SYSDBA // Required for shutdown operations
+      });
+
+      console.log('✅ Connected with SYSDBA privileges');
+
+      // Execute shutdown command
+      const shutdownCommand = `SHUTDOWN ${mode.toUpperCase()}`;
+      console.log(`🔄 Executing: ${shutdownCommand}`);
+
+      await connection.execute(shutdownCommand);
       
-      // Handle quoted paths
-      if ((filePath.startsWith('"') && filePath.endsWith('"')) ||
-          (filePath.startsWith("'") && filePath.endsWith("'"))) {
-        filePath = filePath.slice(1, -1);
-      }
-
-      // Extract just the executable path (before any arguments)
-      const pathParts = filePath.split(' ');
-      const executablePath = pathParts[0];
-
-      if (!fs.existsSync(executablePath)) {
-        // Try to resolve the path
-        const resolvedPath = path.resolve(executablePath);
-        if (!fs.existsSync(resolvedPath)) {
-          return { 
-            valid: false, 
-            error: `File not found: "${executablePath}". Please check the path and ensure the file exists.`
-          };
-        }
-        filePath = resolvedPath;
-      }
-
-      // Check if it's a file (not a directory)
-      const stats = fs.statSync(executablePath);
-      if (!stats.isFile()) {
-        return { valid: false, error: 'Path must point to a file, not a directory' };
-      }
-
-      // Check file extension for Windows
-      if (os.platform() === 'win32') {
-        const ext = path.extname(executablePath).toLowerCase();
-        const allowedExtensions = ['.bat', '.cmd', '.ps1', '.exe', '.com', '.msi'];
-        
-        if (!allowedExtensions.includes(ext)) {
-          return { 
-            valid: false, 
-            error: `Unsupported file type: ${ext}. Allowed types: ${allowedExtensions.join(', ')}`
-          };
-        }
-      } else {
-        // For Unix-like systems, check if file is executable
-        try {
-          fs.accessSync(executablePath, fs.constants.X_OK);
-        } catch (error) {
-          console.warn(`Warning: File may not be executable: ${executablePath}`);
-          // Don't fail validation, just warn
-        }
-      }
-
-      console.log(`✅ File path validated: ${executablePath}`);
-      return { 
-        valid: true, 
-        message: 'Script file is valid and accessible',
-        isSystemCommand: false,
-        resolvedPath: executablePath
+      // Close the connection
+      await connection.close();
+      
+      const successMessage = `✅ Oracle Database shutdown ${mode} completed successfully`;
+      console.log(successMessage);
+      
+      return {
+        success: true,
+        output: `Database shutdown completed successfully.\n\nMode: ${mode.toUpperCase()}\nTimestamp: ${new Date().toLocaleString()}\n\n${successMessage}`,
+        executedAt: new Date().toISOString()
       };
 
     } catch (error) {
-      console.error(`❌ Path validation error:`, error);
-      return { 
-        valid: false, 
-        error: `Error validating script path: ${error.message}` 
+      console.error('❌ Database shutdown failed:', error);
+      
+      let errorMessage = `Database shutdown failed: ${error.message}`;
+      
+      // Add helpful error explanations
+      if (error.message.includes('privilege')) {
+        errorMessage += '\n\nNote: SYSDBA privilege is required for shutdown operations.';
+      }
+      
+      if (error.message.includes('not configured')) {
+        errorMessage += '\n\nPlease configure the database connection in Database Config first.';
+      }
+
+      return {
+        success: false,
+        output: errorMessage,
+        executedAt: new Date().toISOString(),
+        error: error.message
       };
+    } finally {
+      this.isDbOperationInProgress = false;
+    }
+  }
+
+  /**
+   * Oracle Database Startup Operation
+   */
+  async executeDatabaseStartup(mode = 'open') {
+    if (this.isDbOperationInProgress) {
+      throw new Error('Database operation already in progress');
+    }
+
+    this.isDbOperationInProgress = true;
+    console.log(`🔄 Starting Oracle database startup with mode: ${mode}`);
+
+    try {
+      // Validate startup mode
+      const validModes = ['open', 'mount', 'nomount'];
+      if (!validModes.includes(mode.toLowerCase())) {
+        throw new Error(`Invalid startup mode. Use: ${validModes.join(', ')}`);
+      }
+
+      // Get database configuration
+      const config = dbConfigService.getConfig();
+      if (!config.isConfigured) {
+        throw new Error('Database not configured. Please configure database connection first.');
+      }
+
+      console.log('🔗 Connecting to Oracle with SYSDBA privileges...');
+
+      // For startup, we need to connect to a potentially down database
+      // So we'll connect to the instance (not the database)
+      const connection = await oracledb.getConnection({
+        user: config.user,
+        password: config.password,
+        connectString: config.connectString,
+        privilege: oracledb.SYSDBA
+      });
+
+      console.log('✅ Connected with SYSDBA privileges');
+
+      // Execute startup command
+      let startupCommand;
+      if (mode.toLowerCase() === 'open') {
+        startupCommand = 'STARTUP';
+      } else {
+        startupCommand = `STARTUP ${mode.toUpperCase()}`;
+      }
+      
+      console.log(`🔄 Executing: ${startupCommand}`);
+
+      await connection.execute(startupCommand);
+      
+      // If we're opening the database, we might need additional steps
+      if (mode.toLowerCase() === 'mount') {
+        console.log('📌 Database mounted successfully');
+      } else if (mode.toLowerCase() === 'nomount') {
+        console.log('🚀 Instance started (nomount mode)');
+      } else {
+        console.log('🗄️ Database opened successfully');
+      }
+      
+      // Close the connection
+      await connection.close();
+      
+      const successMessage = `✅ Oracle Database startup ${mode} completed successfully`;
+      console.log(successMessage);
+      
+      return {
+        success: true,
+        output: `Database startup completed successfully.\n\nMode: ${mode.toUpperCase()}\nTimestamp: ${new Date().toLocaleString()}\n\n${successMessage}`,
+        executedAt: new Date().toISOString()
+      };
+
+    } catch (error) {
+      console.error('❌ Database startup failed:', error);
+      
+      let errorMessage = `Database startup failed: ${error.message}`;
+      
+      // Add helpful error explanations
+      if (error.message.includes('privilege')) {
+        errorMessage += '\n\nNote: SYSDBA privilege is required for startup operations.';
+      }
+      
+      if (error.message.includes('not configured')) {
+        errorMessage += '\n\nPlease configure the database connection in Database Config first.';
+      }
+
+      return {
+        success: false,
+        output: errorMessage,
+        executedAt: new Date().toISOString(),
+        error: error.message
+      };
+    } finally {
+      this.isDbOperationInProgress = false;
     }
   }
 
   async runScript(scriptId) {
-  const scripts = this.getAllScripts();
-  const script = scripts.find(s => s.id === parseInt(scriptId));
-  
-  if (!script) {
-    throw new Error(`Script not found with ID: ${scriptId}`);
-  }
-
-  try {
-    console.log(`🏃 Running script: ${script.name}`);
-    console.log(`📁 Path: ${script.scriptPath}`);
-    console.log(`⚙️ Arguments: ${script.arguments || 'None'}`);
-    console.log(`🕐 Start time: ${new Date().toISOString()}`);
-
-    // Update script status to running
-    this.updateScriptStatus(scriptId, 'running');
-
-    // Prepare the command with better error handling
-    let command = this.prepareCommand(script.scriptPath, script.arguments);
-    console.log(`🖥️ Executing command: ${command}`);
-
-    // Enhanced execution with better error handling
-    const startTime = Date.now();
+    const scripts = this.getAllScripts();
+    const script = scripts.find(s => s.id === parseInt(scriptId));
     
+    if (!script) {
+      throw new Error('Script not found');
+    }
+
     try {
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 600000, // 10 minutes timeout
-        maxBuffer: 1024 * 1024 * 50, // 50MB buffer
-        windowsHide: true,
-        shell: true,
-        cwd: process.cwd(), // Use current working directory
-        env: { ...process.env }, // Include all environment variables
-        killSignal: 'SIGTERM'
-      });
+      console.log(`🏃 Running script: ${script.name}`);
+      console.log(`📁 Path: ${script.scriptPath}`);
+      console.log(`⚙️ Arguments: ${script.arguments}`);
 
-      const executionTime = Date.now() - startTime;
-      console.log(`⏱️ Execution time: ${executionTime}ms`);
+      // Update script status to running
+      this.updateScriptStatus(scriptId, 'running');
 
-      // Process output
-      let output = '';
-      if (stdout && stdout.trim()) {
-        output += `STDOUT:\n${stdout.trim()}\n`;
-      }
-      if (stderr && stderr.trim()) {
-        output += `STDERR:\n${stderr.trim()}\n`;
+      // Check if this is a database operation
+      if (script.scriptPath === 'ORACLE_DB_SHUTDOWN') {
+        const mode = script.arguments || 'immediate';
+        return await this.executeDatabaseShutdown(mode);
       }
       
-      if (!output.trim()) {
-        output = `Script completed successfully in ${executionTime}ms (no output)`;
-      } else {
-        output += `\n--- Execution completed in ${executionTime}ms ---`;
+      if (script.scriptPath === 'ORACLE_DB_STARTUP') {
+        const mode = script.arguments || 'open';
+        return await this.executeDatabaseStartup(mode);
       }
 
+      // Regular script execution
+      // Construct the command
+      let command = script.scriptPath;
+      
+      // Add arguments if they exist
+      if (script.arguments && script.arguments.trim()) {
+        command += ` ${script.arguments.trim()}`;
+      }
+
+      // Add quotes around the path if it contains spaces and isn't already quoted
+      if (script.scriptPath.includes(' ') && !script.scriptPath.startsWith('"')) {
+        command = `"${script.scriptPath}"`;
+        if (script.arguments && script.arguments.trim()) {
+          command += ` ${script.arguments.trim()}`;
+        }
+      }
+
+      console.log(`🖥️ Executing command: ${command}`);
+
+      // Execute the script with a timeout of 5 minutes
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: 300000, // 5 minutes
+        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        windowsHide: true,
+        shell: true
+      });
+
+      // Combine stdout and stderr
+      let output = '';
+      if (stdout) output += stdout;
+      if (stderr) output += stderr;
+
       console.log(`✅ Script completed successfully`);
-      console.log(`📊 Output length: ${output.length} characters`);
 
       // Update script status
       this.updateScriptStatus(scriptId, 'success');
 
       return {
         success: true,
-        output: output,
-        executedAt: new Date().toISOString(),
-        executionTime: executionTime
+        output: output || 'Script completed successfully (no output)',
+        executedAt: new Date().toISOString()
       };
 
-    } catch (execError) {
-      const executionTime = Date.now() - startTime;
-      console.error(`❌ Script execution failed after ${executionTime}ms:`, execError);
+    } catch (error) {
+      console.error(`❌ Script execution failed:`, error);
 
       // Update script status
       this.updateScriptStatus(scriptId, 'failed');
 
-      // Build detailed error output
-      let errorOutput = `Script execution failed after ${executionTime}ms\n`;
-      errorOutput += `Error: ${execError.message}\n`;
+      let errorOutput = `Error: ${error.message}`;
       
-      if (execError.code) {
-        errorOutput += `Exit code: ${execError.code}\n`;
-      }
-      
-      if (execError.signal) {
-        errorOutput += `Signal: ${execError.signal}\n`;
-      }
-      
-      if (execError.stdout && execError.stdout.trim()) {
-        errorOutput += `\nSTDOUT:\n${execError.stdout.trim()}\n`;
-      }
-      
-      if (execError.stderr && execError.stderr.trim()) {
-        errorOutput += `\nSTDERR:\n${execError.stderr.trim()}\n`;
-      }
-
-      // Handle specific error types
-      if (execError.code === 'ENOENT') {
-        errorOutput += `\n❌ File not found: "${script.scriptPath}"`;
-        errorOutput += `\n💡 Check if the file exists and the path is correct`;
-      } else if (execError.code === 'EACCES') {
-        errorOutput += `\n❌ Permission denied: "${script.scriptPath}"`;
-        errorOutput += `\n💡 Check file permissions`;
-      } else if (execError.signal === 'SIGTERM') {
-        errorOutput += `\n❌ Script was terminated (timeout or manual stop)`;
-      }
+      // Include stdout/stderr if available
+      if (error.stdout) errorOutput += `\n\nOutput:\n${error.stdout}`;
+      if (error.stderr) errorOutput += `\n\nError Output:\n${error.stderr}`;
 
       return {
         success: false,
         output: errorOutput,
-        error: execError.message,
-        executedAt: new Date().toISOString(),
-        executionTime: executionTime
+        error: error.message,
+        executedAt: new Date().toISOString()
       };
     }
-  } catch (error) {
-    console.error(`💥 Unexpected error in runScript:`, error);
-    
-    // Update script status
-    this.updateScriptStatus(scriptId, 'failed');
-
-    return {
-      success: false,
-      output: `Unexpected error: ${error.message}`,
-      error: error.message,
-      executedAt: new Date().toISOString()
-    };
   }
-}
-
-  // Helper method to prepare command for execution
-  prepareCommand(scriptPath, args) {
-  let command = scriptPath.trim();
-  
-  // Handle system commands vs file paths differently
-  const systemCommands = [
-    'systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping',
-    'whoami', 'hostname', 'date', 'time', 'echo', 'cls', 'type',
-    'ls', 'ps', 'uname', 'df', 'free', 'top', 'cat', 'grep',
-    'python', 'node', 'npm', 'git', 'docker', 'kubectl'
-  ];
-
-  const commandName = command.split(' ')[0].toLowerCase();
-  const isSystemCommand = systemCommands.includes(commandName);
-
-  if (!isSystemCommand && command.includes(' ') && !command.startsWith('"')) {
-    // Quote file paths with spaces
-    command = `"${command}"`;
-  }
-  
-  // Add arguments if they exist
-  if (args && args.trim()) {
-    command += ` ${args.trim()}`;
-  }
-  
-  return command;
-}
 
   updateScriptStatus(scriptId, status) {
     const data = this.loadScripts();
@@ -399,6 +428,38 @@ class ScriptService {
       data.scripts[scriptIndex].lastStatus = status;
       data.scripts[scriptIndex].lastRunAt = new Date().toISOString();
       this.saveScripts(data);
+    }
+  }
+
+  validateScriptPath(scriptPath) {
+    try {
+      // Handle special database operations
+      if (scriptPath === 'ORACLE_DB_SHUTDOWN' || scriptPath === 'ORACLE_DB_STARTUP') {
+        return { valid: true, message: 'Oracle database operation' };
+      }
+
+      // Check if the file exists for regular scripts
+      if (!fs.existsSync(scriptPath)) {
+        return { valid: false, error: 'Script file does not exist' };
+      }
+
+      // Check if it's a file (not a directory)
+      const stats = fs.statSync(scriptPath);
+      if (!stats.isFile()) {
+        return { valid: false, error: 'Path is not a file' };
+      }
+
+      // Check file extension for common script types
+      const ext = path.extname(scriptPath).toLowerCase();
+      const allowedExtensions = ['.bat', '.cmd', '.ps1', '.exe', '.com'];
+      
+      if (!allowedExtensions.includes(ext)) {
+        console.warn(`Warning: Unusual file extension ${ext} for script ${scriptPath}`);
+      }
+
+      return { valid: true, message: 'Script file is valid' };
+    } catch (error) {
+      return { valid: false, error: `Error validating script: ${error.message}` };
     }
   }
 
@@ -412,43 +473,8 @@ class ScriptService {
       scriptId: script.id,
       scriptName: script.name,
       lastRunAt: script.lastRunAt,
-      lastStatus: script.lastStatus,
-      scriptPath: script.scriptPath,
-      arguments: script.arguments
+      lastStatus: script.lastStatus
     };
-  }
-
-  // New method to get suggested script paths
-  getSuggestedPaths() {
-    const suggestions = [];
-    
-    if (os.platform() === 'win32') {
-      suggestions.push(
-        'C:\\Windows\\System32\\systeminfo.exe',
-        'C:\\Windows\\System32\\ipconfig.exe',
-        'C:\\Windows\\System32\\ping.exe',
-        'C:\\Windows\\System32\\netstat.exe',
-        'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-        'systeminfo',
-        'dir',
-        'ipconfig /all',
-        'ping google.com'
-      );
-    } else {
-      suggestions.push(
-        '/bin/ls',
-        '/bin/ps',
-        '/usr/bin/uname',
-        '/usr/bin/df',
-        '/usr/bin/free',
-        'ls -la',
-        'ps aux',
-        'uname -a',
-        'df -h'
-      );
-    }
-    
-    return suggestions;
   }
 }
 
