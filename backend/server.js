@@ -970,189 +970,92 @@ app.post('/api/thresholds/db-size', (req, res) => {
 
 
 // SCRIPT MANAGEMENT ROUTES
-app.get('/api/scripts', (req, res) => {
-  try {
-    const scripts = scriptService.getAllScripts();
-    console.log(`📜 Retrieved ${scripts.length} scripts`);
-    res.json({ success: true, data: scripts });
-  } catch (error) {
-    console.error('❌ Get scripts error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/scripts', (req, res) => {
-  try {
-    const { name, description, scriptPath, arguments: args } = req.body;
-    
-    console.log('📝 Creating script:', { name, scriptPath, args });
-    
-    if (!name || !scriptPath) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Name and script path are required' 
-      });
-    }
-
-    // Validate the script path
-    const validation = scriptService.validateScriptPath(scriptPath);
-    if (!validation.valid) {
-      console.log('❌ Script validation failed:', validation.error);
-      return res.status(400).json({ 
-        success: false,
-        error: `Script validation failed: ${validation.error}` 
-      });
-    }
-
-    const newScript = scriptService.addScript({
-      name,
-      description,
-      scriptPath,
-      arguments: args
-    });
-    
-    if (newScript) {
-      console.log('✅ Script created successfully:', newScript.name);
-      res.json({ success: true, data: newScript });
-    } else {
-      res.status(500).json({ success: false, error: 'Failed to create script' });
-    }
-  } catch (error) {
-    console.error('❌ Create script error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.put('/api/scripts/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, description, scriptPath, arguments: args } = req.body;
-    
-    console.log('🔄 Updating script:', id, { name, scriptPath, args });
-    
-    if (!name || !scriptPath) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Name and script path are required' 
-      });
-    }
-
-    // Validate the script path
-    const validation = scriptService.validateScriptPath(scriptPath);
-    if (!validation.valid) {
-      console.log('❌ Script validation failed:', validation.error);
-      return res.status(400).json({ 
-        success: false,
-        error: `Script validation failed: ${validation.error}` 
-      });
-    }
-
-    const updatedScript = scriptService.updateScript(id, {
-      name,
-      description,
-      scriptPath,
-      arguments: args
-    });
-    
-    if (updatedScript) {
-      console.log('✅ Script updated successfully:', updatedScript.name);
-      res.json({ success: true, data: updatedScript });
-    } else {
-      res.status(404).json({ success: false, error: 'Script not found' });
-    }
-  } catch (error) {
-    console.error('❌ Update script error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.delete('/api/scripts/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    console.log('🗑️ Deleting script:', id);
-    
-    const deleted = scriptService.deleteScript(id);
-    
-    if (deleted) {
-      console.log('✅ Script deleted successfully');
-      res.json({ success: true, message: 'Script deleted successfully' });
-    } else {
-      res.status(404).json({ success: false, error: 'Script not found' });
-    }
-  } catch (error) {
-    console.error('❌ Delete script error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+// Enhanced Script Execution Route - Add to backend/server.js
+// Replace your existing /api/scripts/:id/run route with this improved version
 
 app.post('/api/scripts/:id/run', async (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log('🏃 Running script:', id);
+    console.log('🏃 Script execution request received for ID:', id);
+    console.log('⏰ Request time:', new Date().toISOString());
     
+    // Validate script ID
+    if (!id || isNaN(parseInt(id))) {
+      console.log('❌ Invalid script ID:', id);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid script ID provided' 
+      });
+    }
+
+    // Check if script exists before attempting to run
+    const scripts = scriptService.getAllScripts();
+    const script = scripts.find(s => s.id === parseInt(id));
+    
+    if (!script) {
+      console.log('❌ Script not found with ID:', id);
+      return res.status(404).json({ 
+        success: false,
+        error: `Script with ID ${id} not found` 
+      });
+    }
+
+    console.log('📋 Script details:', {
+      name: script.name,
+      path: script.scriptPath,
+      args: script.arguments
+    });
+
+    // Set longer timeout for the response
+    res.setTimeout(600000); // 10 minutes
+
+    // Execute the script using the scriptService
+    console.log('🚀 Starting script execution...');
     const result = await scriptService.runScript(id);
+    console.log('✅ Script execution completed:', {
+      success: result.success,
+      hasOutput: !!result.output,
+      outputLength: result.output?.length || 0
+    });
     
     if (result.success) {
       console.log('✅ Script executed successfully');
       res.json({ 
         success: true, 
-        output: result.output,
-        executedAt: result.executedAt
+        output: result.output || 'Script completed successfully (no output)',
+        executedAt: result.executedAt,
+        executionTime: result.executionTime
       });
     } else {
-      console.log('❌ Script execution failed');
+      console.log('❌ Script execution failed:', result.error);
       res.status(400).json({ 
         success: false,
-        error: result.error,
-        output: result.output,
-        executedAt: result.executedAt
+        error: result.error || 'Script execution failed',
+        output: result.output || '',
+        executedAt: result.executedAt,
+        executionTime: result.executionTime
       });
     }
   } catch (error) {
-    console.error('❌ Run script error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-app.get('/api/scripts/:id/history', (req, res) => {
-  try {
-    const { id } = req.params;
-    const history = scriptService.getScriptExecutionHistory(id);
+    console.error('💥 Script execution route error:', error);
+    console.error('Error stack:', error.stack);
     
-    if (history) {
-      res.json({ success: true, data: history });
-    } else {
-      res.status(404).json({ success: false, error: 'Script not found' });
-    }
-  } catch (error) {
-    console.error('❌ Get script history error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/scripts/validate-path', (req, res) => {
-  try {
-    const { scriptPath } = req.body;
-    
-    if (!scriptPath) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Script path is required' 
+    // Check if response was already sent
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        error: `Server error: ${error.message}`,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
-
-    const validation = scriptService.validateScriptPath(scriptPath);
-    res.json({ success: validation.valid, ...validation });
-  } catch (error) {
-    console.error('❌ Validate script path error:', error);
-    res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Enhanced Script Service with Better Error Handling
+// Replace your runScript method in backend/services/scriptService.js
+
+
 
 
 

@@ -307,46 +307,129 @@ export const thresholdAPI = {
 
 // Script API functions 
 export const scriptAPI = {
-  // Get all scripts
   getAllScripts: async () => {
-    const response = await api.get('/api/scripts');
-    return response.data;
+    try {
+      console.log('🔍 Fetching all scripts...');
+      const response = await api.get('/api/scripts');
+      console.log('✅ Scripts loaded successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to load scripts:', error);
+      throw new Error(`Failed to load scripts: ${error.response?.data?.error || error.message}`);
+    }
   },
 
-  // Add new script
   addScript: async (scriptData) => {
-    const response = await api.post('/api/scripts', scriptData);
-    return response.data;
+    try {
+      console.log('📝 Adding script:', scriptData);
+      const response = await api.post('/api/scripts', scriptData);
+      console.log('✅ Script added successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to add script:', error);
+      throw new Error(`Failed to add script: ${error.response?.data?.error || error.message}`);
+    }
   },
 
-  // Update existing script
   updateScript: async (id, scriptData) => {
-    const response = await api.put(`/api/scripts/${id}`, scriptData);
-    return response.data;
+    try {
+      console.log('🔄 Updating script:', id, scriptData);
+      const response = await api.put(`/api/scripts/${id}`, scriptData);
+      console.log('✅ Script updated successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to update script:', error);
+      throw new Error(`Failed to update script: ${error.response?.data?.error || error.message}`);
+    }
   },
 
-  // Delete script
   deleteScript: async (id) => {
-    const response = await api.delete(`/api/scripts/${id}`);
-    return response.data;
+    try {
+      console.log('🗑️ Deleting script:', id);
+      const response = await api.delete(`/api/scripts/${id}`);
+      console.log('✅ Script deleted successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to delete script:', error);
+      throw new Error(`Failed to delete script: ${error.response?.data?.error || error.message}`);
+    }
   },
 
-  // Run script
+  // ENHANCED RUN SCRIPT WITH BETTER ERROR HANDLING
   runScript: async (id) => {
-    const response = await api.post(`/api/scripts/${id}/run`);
-    return response.data;
+    try {
+      console.log('🏃 Running script with ID:', id);
+      console.log('⏰ Starting script execution at:', new Date().toISOString());
+      
+      // Increased timeout for script execution (10 minutes)
+      const response = await api.post(`/api/scripts/${id}/run`, {}, {
+        timeout: 600000, // 10 minutes timeout
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('✅ Script execution completed:', response.data);
+      console.log('⏰ Completed at:', new Date().toISOString());
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ Script execution failed:', error);
+      
+      // Better error handling for different types of network errors
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Script execution timed out. The script may be taking longer than expected.');
+      } else if (error.code === 'ECONNREFUSED') {
+        throw new Error('Cannot connect to server. Please check if the backend is running.');
+      } else if (error.code === 'ENETUNREACH') {
+        throw new Error('Network unreachable. Please check your connection.');
+      } else if (error.response?.status === 500) {
+        throw new Error(`Server error: ${error.response?.data?.error || 'Internal server error'}`);
+      } else if (error.response?.status === 400) {
+        throw new Error(`Script error: ${error.response?.data?.error || 'Bad request'}`);
+      } else if (error.response?.status === 404) {
+        throw new Error('Script not found. Please refresh and try again.');
+      } else {
+        throw new Error(`Network error: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+      }
+    }
   },
 
-  // Get script execution history
   getScriptHistory: async (id) => {
-    const response = await api.get(`/api/scripts/${id}/history`);
-    return response.data;
+    try {
+      console.log('📊 Getting script history for ID:', id);
+      const response = await api.get(`/api/scripts/${id}/history`);
+      console.log('✅ Script history loaded:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to get script history:', error);
+      throw new Error(`Failed to get script history: ${error.response?.data?.error || error.message}`);
+    }
   },
 
-  // Validate script path (NEW FUNCTION)
   validatePath: async (data) => {
-    const response = await api.post('/api/scripts/validate-path', data);
-    return response.data;
+    try {
+      console.log('🔍 Validating script path:', data.scriptPath);
+      const response = await api.post('/api/scripts/validate-path', data);
+      console.log('✅ Path validation result:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to validate path:', error);
+      return { valid: false, error: 'Failed to validate path' };
+    }
+  },
+
+  // NEW: Test connection to backend
+  testConnection: async () => {
+    try {
+      console.log('🔗 Testing backend connection...');
+      const response = await api.get('/api/health');
+      console.log('✅ Backend connection successful:', response.data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      console.error('❌ Backend connection failed:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
 export default api;

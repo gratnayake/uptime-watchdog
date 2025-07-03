@@ -236,47 +236,61 @@ class ScriptService {
     }
   }
 
-  // IMPROVED SCRIPT EXECUTION
   async runScript(scriptId) {
-    const scripts = this.getAllScripts();
-    const script = scripts.find(s => s.id === parseInt(scriptId));
+  const scripts = this.getAllScripts();
+  const script = scripts.find(s => s.id === parseInt(scriptId));
+  
+  if (!script) {
+    throw new Error(`Script not found with ID: ${scriptId}`);
+  }
+
+  try {
+    console.log(`🏃 Running script: ${script.name}`);
+    console.log(`📁 Path: ${script.scriptPath}`);
+    console.log(`⚙️ Arguments: ${script.arguments || 'None'}`);
+    console.log(`🕐 Start time: ${new Date().toISOString()}`);
+
+    // Update script status to running
+    this.updateScriptStatus(scriptId, 'running');
+
+    // Prepare the command with better error handling
+    let command = this.prepareCommand(script.scriptPath, script.arguments);
+    console.log(`🖥️ Executing command: ${command}`);
+
+    // Enhanced execution with better error handling
+    const startTime = Date.now();
     
-    if (!script) {
-      throw new Error('Script not found');
-    }
-
     try {
-      console.log(`🏃 Running script: ${script.name}`);
-      console.log(`📁 Path: ${script.scriptPath}`);
-      console.log(`⚙️ Arguments: ${script.arguments}`);
-
-      // Update script status to running
-      this.updateScriptStatus(scriptId, 'running');
-
-      // Prepare the command
-      let command = this.prepareCommand(script.scriptPath, script.arguments);
-      
-      console.log(`🖥️ Executing command: ${command}`);
-
-      // Execute with improved error handling
       const { stdout, stderr } = await execAsync(command, {
-        timeout: 300000, // 5 minutes
-        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        timeout: 600000, // 10 minutes timeout
+        maxBuffer: 1024 * 1024 * 50, // 50MB buffer
         windowsHide: true,
         shell: true,
-        cwd: os.homedir() // Set working directory to user home
+        cwd: process.cwd(), // Use current working directory
+        env: { ...process.env }, // Include all environment variables
+        killSignal: 'SIGTERM'
       });
 
-      // Combine output
+      const executionTime = Date.now() - startTime;
+      console.log(`⏱️ Execution time: ${executionTime}ms`);
+
+      // Process output
       let output = '';
-      if (stdout) output += `STDOUT:\n${stdout}\n`;
-      if (stderr) output += `STDERR:\n${stderr}\n`;
+      if (stdout && stdout.trim()) {
+        output += `STDOUT:\n${stdout.trim()}\n`;
+      }
+      if (stderr && stderr.trim()) {
+        output += `STDERR:\n${stderr.trim()}\n`;
+      }
       
       if (!output.trim()) {
-        output = 'Script completed successfully (no output)';
+        output = `Script completed successfully in ${executionTime}ms (no output)`;
+      } else {
+        output += `\n--- Execution completed in ${executionTime}ms ---`;
       }
 
       console.log(`✅ Script completed successfully`);
+      console.log(`📊 Output length: ${output.length} characters`);
 
       // Update script status
       this.updateScriptStatus(scriptId, 'success');
@@ -284,52 +298,98 @@ class ScriptService {
       return {
         success: true,
         output: output,
-        executedAt: new Date().toISOString()
+        executedAt: new Date().toISOString(),
+        executionTime: executionTime
       };
 
-    } catch (error) {
-      console.error(`❌ Script execution failed:`, error);
+    } catch (execError) {
+      const executionTime = Date.now() - startTime;
+      console.error(`❌ Script execution failed after ${executionTime}ms:`, execError);
 
       // Update script status
       this.updateScriptStatus(scriptId, 'failed');
 
-      let errorOutput = `Error: ${error.message}\n`;
+      // Build detailed error output
+      let errorOutput = `Script execution failed after ${executionTime}ms\n`;
+      errorOutput += `Error: ${execError.message}\n`;
       
-      // Include stdout/stderr if available
-      if (error.stdout) errorOutput += `\nOutput:\n${error.stdout}`;
-      if (error.stderr) errorOutput += `\nError Output:\n${error.stderr}`;
+      if (execError.code) {
+        errorOutput += `Exit code: ${execError.code}\n`;
+      }
+      
+      if (execError.signal) {
+        errorOutput += `Signal: ${execError.signal}\n`;
+      }
+      
+      if (execError.stdout && execError.stdout.trim()) {
+        errorOutput += `\nSTDOUT:\n${execError.stdout.trim()}\n`;
+      }
+      
+      if (execError.stderr && execError.stderr.trim()) {
+        errorOutput += `\nSTDERR:\n${execError.stderr.trim()}\n`;
+      }
+
+      // Handle specific error types
+      if (execError.code === 'ENOENT') {
+        errorOutput += `\n❌ File not found: "${script.scriptPath}"`;
+        errorOutput += `\n💡 Check if the file exists and the path is correct`;
+      } else if (execError.code === 'EACCES') {
+        errorOutput += `\n❌ Permission denied: "${script.scriptPath}"`;
+        errorOutput += `\n💡 Check file permissions`;
+      } else if (execError.signal === 'SIGTERM') {
+        errorOutput += `\n❌ Script was terminated (timeout or manual stop)`;
+      }
 
       return {
         success: false,
         output: errorOutput,
-        error: error.message,
-        executedAt: new Date().toISOString()
+        error: execError.message,
+        executedAt: new Date().toISOString(),
+        executionTime: executionTime
       };
     }
+  } catch (error) {
+    console.error(`💥 Unexpected error in runScript:`, error);
+    
+    // Update script status
+    this.updateScriptStatus(scriptId, 'failed');
+
+    return {
+      success: false,
+      output: `Unexpected error: ${error.message}`,
+      error: error.message,
+      executedAt: new Date().toISOString()
+    };
   }
+}
 
   // Helper method to prepare command for execution
   prepareCommand(scriptPath, args) {
-    let command = scriptPath.trim();
-    
-    // Handle spaces in path
-    if (command.includes(' ') && !command.startsWith('"') && !command.startsWith("'")) {
-      // Check if it's a system command
-      const firstWord = command.split(' ')[0];
-      const systemCommands = ['systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping', 'ls', 'ps', 'uname'];
-      
-      if (!systemCommands.includes(firstWord.toLowerCase())) {
-        command = `"${command}"`;
-      }
-    }
-    
-    // Add arguments if they exist
-    if (args && args.trim()) {
-      command += ` ${args.trim()}`;
-    }
-    
-    return command;
+  let command = scriptPath.trim();
+  
+  // Handle system commands vs file paths differently
+  const systemCommands = [
+    'systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping',
+    'whoami', 'hostname', 'date', 'time', 'echo', 'cls', 'type',
+    'ls', 'ps', 'uname', 'df', 'free', 'top', 'cat', 'grep',
+    'python', 'node', 'npm', 'git', 'docker', 'kubectl'
+  ];
+
+  const commandName = command.split(' ')[0].toLowerCase();
+  const isSystemCommand = systemCommands.includes(commandName);
+
+  if (!isSystemCommand && command.includes(' ') && !command.startsWith('"')) {
+    // Quote file paths with spaces
+    command = `"${command}"`;
   }
+  
+  // Add arguments if they exist
+  if (args && args.trim()) {
+    command += ` ${args.trim()}`;
+  }
+  
+  return command;
+}
 
   updateScriptStatus(scriptId, status) {
     const data = this.loadScripts();
