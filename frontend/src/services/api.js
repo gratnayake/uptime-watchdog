@@ -304,40 +304,48 @@ export const thresholdAPI = {
 };
 
 
-// Script API functions
+
+// Script API functions 
 export const scriptAPI = {
+  // Get all scripts
   getAllScripts: async () => {
     const response = await api.get('/api/scripts');
     return response.data;
   },
 
+  // Add new script
   addScript: async (scriptData) => {
     const response = await api.post('/api/scripts', scriptData);
     return response.data;
   },
 
+  // Update existing script
   updateScript: async (id, scriptData) => {
     const response = await api.put(`/api/scripts/${id}`, scriptData);
     return response.data;
   },
 
+  // Delete script
   deleteScript: async (id) => {
     const response = await api.delete(`/api/scripts/${id}`);
     return response.data;
   },
 
+  // Run script
   runScript: async (id) => {
     const response = await api.post(`/api/scripts/${id}/run`);
     return response.data;
   },
 
+  // Get script execution history
   getScriptHistory: async (id) => {
     const response = await api.get(`/api/scripts/${id}/history`);
     return response.data;
   },
 
-  validateScriptPath: async (scriptPath) => {
-    const response = await api.post('/api/scripts/validate-path', { scriptPath });
+  // Validate script path (NEW FUNCTION)
+  validatePath: async (data) => {
+    const response = await api.post('/api/scripts/validate-path', data);
     return response.data;
   }
 };

@@ -1,14 +1,25 @@
+// Improved Script Service - backend/services/scriptService.js
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
+const os = require('os');
 
 const execAsync = util.promisify(exec);
 
 class ScriptService {
   constructor() {
     this.scriptsFile = path.join(__dirname, '../data/scripts.json');
+    this.ensureDataDirectory();
     this.ensureScriptsFile();
+  }
+
+  ensureDataDirectory() {
+    const dataDir = path.join(__dirname, '../data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+      console.log('📁 Created data directory');
+    }
   }
 
   ensureScriptsFile() {
@@ -19,7 +30,7 @@ class ScriptService {
             id: 1,
             name: 'System Information',
             description: 'Display basic system information',
-            scriptPath: 'systeminfo',
+            scriptPath: os.platform() === 'win32' ? 'systeminfo' : 'uname -a',
             arguments: '',
             lastRunAt: null,
             lastStatus: null,
@@ -29,8 +40,8 @@ class ScriptService {
             id: 2,
             name: 'Directory Listing',
             description: 'List current directory contents',
-            scriptPath: 'dir',
-            arguments: '/w',
+            scriptPath: os.platform() === 'win32' ? 'dir' : 'ls',
+            arguments: os.platform() === 'win32' ? '/w' : '-la',
             lastRunAt: null,
             lastStatus: null,
             createdAt: new Date().toISOString()
@@ -78,7 +89,7 @@ class ScriptService {
       id: Date.now(),
       name: scriptData.name,
       description: scriptData.description || '',
-      scriptPath: scriptData.scriptPath,
+      scriptPath: scriptData.scriptPath.trim(),
       arguments: scriptData.arguments || '',
       lastRunAt: null,
       lastStatus: null,
@@ -104,7 +115,7 @@ class ScriptService {
       ...data.scripts[scriptIndex],
       name: scriptData.name,
       description: scriptData.description || '',
-      scriptPath: scriptData.scriptPath,
+      scriptPath: scriptData.scriptPath.trim(),
       arguments: scriptData.arguments || '',
       updatedAt: new Date().toISOString()
     };
@@ -125,6 +136,107 @@ class ScriptService {
     return this.saveScripts(data);
   }
 
+  // IMPROVED PATH VALIDATION
+  validateScriptPath(scriptPath) {
+    try {
+      if (!scriptPath || scriptPath.trim() === '') {
+        return { valid: false, error: 'Script path cannot be empty' };
+      }
+
+      const cleanPath = scriptPath.trim();
+      console.log(`🔍 Validating script path: "${cleanPath}"`);
+
+      // Check for system commands first (don't require file existence)
+      const systemCommands = [
+        'systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping',
+        'whoami', 'hostname', 'date', 'time', 'echo', 'cls', 'type',
+        'ls', 'ps', 'uname', 'df', 'free', 'top', 'cat', 'grep',
+        'python', 'node', 'npm', 'git', 'docker', 'kubectl'
+      ];
+
+      const commandName = cleanPath.split(' ')[0].toLowerCase();
+      const isSystemCommand = systemCommands.includes(commandName) || 
+                             systemCommands.includes(path.basename(commandName, path.extname(commandName)));
+
+      if (isSystemCommand) {
+        console.log(`✅ System command detected: ${commandName}`);
+        return { 
+          valid: true, 
+          message: `System command '${commandName}' is valid`,
+          isSystemCommand: true 
+        };
+      }
+
+      // For file paths, check if file exists
+      let filePath = cleanPath;
+      
+      // Handle quoted paths
+      if ((filePath.startsWith('"') && filePath.endsWith('"')) ||
+          (filePath.startsWith("'") && filePath.endsWith("'"))) {
+        filePath = filePath.slice(1, -1);
+      }
+
+      // Extract just the executable path (before any arguments)
+      const pathParts = filePath.split(' ');
+      const executablePath = pathParts[0];
+
+      if (!fs.existsSync(executablePath)) {
+        // Try to resolve the path
+        const resolvedPath = path.resolve(executablePath);
+        if (!fs.existsSync(resolvedPath)) {
+          return { 
+            valid: false, 
+            error: `File not found: "${executablePath}". Please check the path and ensure the file exists.`
+          };
+        }
+        filePath = resolvedPath;
+      }
+
+      // Check if it's a file (not a directory)
+      const stats = fs.statSync(executablePath);
+      if (!stats.isFile()) {
+        return { valid: false, error: 'Path must point to a file, not a directory' };
+      }
+
+      // Check file extension for Windows
+      if (os.platform() === 'win32') {
+        const ext = path.extname(executablePath).toLowerCase();
+        const allowedExtensions = ['.bat', '.cmd', '.ps1', '.exe', '.com', '.msi'];
+        
+        if (!allowedExtensions.includes(ext)) {
+          return { 
+            valid: false, 
+            error: `Unsupported file type: ${ext}. Allowed types: ${allowedExtensions.join(', ')}`
+          };
+        }
+      } else {
+        // For Unix-like systems, check if file is executable
+        try {
+          fs.accessSync(executablePath, fs.constants.X_OK);
+        } catch (error) {
+          console.warn(`Warning: File may not be executable: ${executablePath}`);
+          // Don't fail validation, just warn
+        }
+      }
+
+      console.log(`✅ File path validated: ${executablePath}`);
+      return { 
+        valid: true, 
+        message: 'Script file is valid and accessible',
+        isSystemCommand: false,
+        resolvedPath: executablePath
+      };
+
+    } catch (error) {
+      console.error(`❌ Path validation error:`, error);
+      return { 
+        valid: false, 
+        error: `Error validating script path: ${error.message}` 
+      };
+    }
+  }
+
+  // IMPROVED SCRIPT EXECUTION
   async runScript(scriptId) {
     const scripts = this.getAllScripts();
     const script = scripts.find(s => s.id === parseInt(scriptId));
@@ -141,36 +253,28 @@ class ScriptService {
       // Update script status to running
       this.updateScriptStatus(scriptId, 'running');
 
-      // Construct the command
-      let command = script.scriptPath;
+      // Prepare the command
+      let command = this.prepareCommand(script.scriptPath, script.arguments);
       
-      // Add arguments if they exist
-      if (script.arguments && script.arguments.trim()) {
-        command += ` ${script.arguments.trim()}`;
-      }
-
-      // Add quotes around the path if it contains spaces and isn't already quoted
-      if (script.scriptPath.includes(' ') && !script.scriptPath.startsWith('"')) {
-        command = `"${script.scriptPath}"`;
-        if (script.arguments && script.arguments.trim()) {
-          command += ` ${script.arguments.trim()}`;
-        }
-      }
-
       console.log(`🖥️ Executing command: ${command}`);
 
-      // Execute the script with a timeout of 5 minutes
+      // Execute with improved error handling
       const { stdout, stderr } = await execAsync(command, {
         timeout: 300000, // 5 minutes
         maxBuffer: 1024 * 1024 * 10, // 10MB buffer
         windowsHide: true,
-        shell: true
+        shell: true,
+        cwd: os.homedir() // Set working directory to user home
       });
 
-      // Combine stdout and stderr
+      // Combine output
       let output = '';
-      if (stdout) output += stdout;
-      if (stderr) output += stderr;
+      if (stdout) output += `STDOUT:\n${stdout}\n`;
+      if (stderr) output += `STDERR:\n${stderr}\n`;
+      
+      if (!output.trim()) {
+        output = 'Script completed successfully (no output)';
+      }
 
       console.log(`✅ Script completed successfully`);
 
@@ -179,7 +283,7 @@ class ScriptService {
 
       return {
         success: true,
-        output: output || 'Script completed successfully (no output)',
+        output: output,
         executedAt: new Date().toISOString()
       };
 
@@ -189,11 +293,11 @@ class ScriptService {
       // Update script status
       this.updateScriptStatus(scriptId, 'failed');
 
-      let errorOutput = `Error: ${error.message}`;
+      let errorOutput = `Error: ${error.message}\n`;
       
       // Include stdout/stderr if available
-      if (error.stdout) errorOutput += `\n\nOutput:\n${error.stdout}`;
-      if (error.stderr) errorOutput += `\n\nError Output:\n${error.stderr}`;
+      if (error.stdout) errorOutput += `\nOutput:\n${error.stdout}`;
+      if (error.stderr) errorOutput += `\nError Output:\n${error.stderr}`;
 
       return {
         success: false,
@@ -202,6 +306,29 @@ class ScriptService {
         executedAt: new Date().toISOString()
       };
     }
+  }
+
+  // Helper method to prepare command for execution
+  prepareCommand(scriptPath, args) {
+    let command = scriptPath.trim();
+    
+    // Handle spaces in path
+    if (command.includes(' ') && !command.startsWith('"') && !command.startsWith("'")) {
+      // Check if it's a system command
+      const firstWord = command.split(' ')[0];
+      const systemCommands = ['systeminfo', 'dir', 'ipconfig', 'netstat', 'tasklist', 'ping', 'ls', 'ps', 'uname'];
+      
+      if (!systemCommands.includes(firstWord.toLowerCase())) {
+        command = `"${command}"`;
+      }
+    }
+    
+    // Add arguments if they exist
+    if (args && args.trim()) {
+      command += ` ${args.trim()}`;
+    }
+    
+    return command;
   }
 
   updateScriptStatus(scriptId, status) {
@@ -215,36 +342,7 @@ class ScriptService {
     }
   }
 
-  validateScriptPath(scriptPath) {
-    try {
-      // Check if the file exists
-      if (!fs.existsSync(scriptPath)) {
-        return { valid: false, error: 'Script file does not exist' };
-      }
-
-      // Check if it's a file (not a directory)
-      const stats = fs.statSync(scriptPath);
-      if (!stats.isFile()) {
-        return { valid: false, error: 'Path is not a file' };
-      }
-
-      // Check file extension for common script types
-      const ext = path.extname(scriptPath).toLowerCase();
-      const allowedExtensions = ['.bat', '.cmd', '.ps1', '.exe', '.com'];
-      
-      if (!allowedExtensions.includes(ext)) {
-        console.warn(`Warning: Unusual file extension ${ext} for script ${scriptPath}`);
-      }
-
-      return { valid: true, message: 'Script file is valid' };
-    } catch (error) {
-      return { valid: false, error: `Error validating script: ${error.message}` };
-    }
-  }
-
   getScriptExecutionHistory(scriptId) {
-    // In a real implementation, you might want to store execution history separately
-    // For now, we'll just return the last run information
     const scripts = this.getAllScripts();
     const script = scripts.find(s => s.id === parseInt(scriptId));
     
@@ -254,8 +352,43 @@ class ScriptService {
       scriptId: script.id,
       scriptName: script.name,
       lastRunAt: script.lastRunAt,
-      lastStatus: script.lastStatus
+      lastStatus: script.lastStatus,
+      scriptPath: script.scriptPath,
+      arguments: script.arguments
     };
+  }
+
+  // New method to get suggested script paths
+  getSuggestedPaths() {
+    const suggestions = [];
+    
+    if (os.platform() === 'win32') {
+      suggestions.push(
+        'C:\\Windows\\System32\\systeminfo.exe',
+        'C:\\Windows\\System32\\ipconfig.exe',
+        'C:\\Windows\\System32\\ping.exe',
+        'C:\\Windows\\System32\\netstat.exe',
+        'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+        'systeminfo',
+        'dir',
+        'ipconfig /all',
+        'ping google.com'
+      );
+    } else {
+      suggestions.push(
+        '/bin/ls',
+        '/bin/ps',
+        '/usr/bin/uname',
+        '/usr/bin/df',
+        '/usr/bin/free',
+        'ls -la',
+        'ps aux',
+        'uname -a',
+        'df -h'
+      );
+    }
+    
+    return suggestions;
   }
 }
 
