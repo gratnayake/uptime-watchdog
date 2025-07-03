@@ -27,7 +27,7 @@ app.use(express.json());
 const userService = require('./services/userService');
 const dbConfigService = require('./services/dbConfigService');
 const realOracleService = require('./services/realOracleService');
-
+const execAsync = util.promisify(exec);
 // Basic route
 app.get('/', (req, res) => {
   res.json({ 
@@ -1002,7 +1002,7 @@ app.post('/api/execute-script', async (req, res) => {
     const startTime = Date.now();
     
     try {
-      // Execute the script
+      // Execute the script using execAsync
       const { stdout, stderr } = await execAsync(command, {
         timeout: 300000, // 5 minutes
         maxBuffer: 1024 * 1024 * 10, // 10MB
@@ -1144,7 +1144,6 @@ app.post('/api/validate-script-path', (req, res) => {
     });
   }
 });
-
 
 // Error handling middleware
 app.use((err, req, res, next) => {
