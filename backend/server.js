@@ -11,8 +11,9 @@ const kubernetesService = require('./services/kubernetesService');
 const urlMonitoringService = require('./services/urlMonitoringService');
 const kubernetesConfigService = require('./services/kubernetesConfigService');
 const thresholdService = require('./services/thresholdService');
-const scriptService = require('./services/scriptService');
-
+const { exec } = require('child_process');
+const util = require('util');
+const fs = require('fs');
 
 
 const app = express();
@@ -968,95 +969,181 @@ app.post('/api/thresholds/db-size', (req, res) => {
   }
 });
 
-
-// SCRIPT MANAGEMENT ROUTES
-// Enhanced Script Execution Route - Add to backend/server.js
-// Replace your existing /api/scripts/:id/run route with this improved version
-
-app.post('/api/scripts/:id/run', async (req, res) => {
+app.post('/api/execute-script', async (req, res) => {
   try {
-    const { id } = req.params;
+    const { scriptPath, arguments: args, name } = req.body;
     
-    console.log('🏃 Script execution request received for ID:', id);
-    console.log('⏰ Request time:', new Date().toISOString());
+    console.log('🏃 Script execution request:', { name, scriptPath, args });
     
-    // Validate script ID
-    if (!id || isNaN(parseInt(id))) {
-      console.log('❌ Invalid script ID:', id);
-      return res.status(400).json({ 
+    // Basic validation
+    if (!scriptPath) {
+      return res.status(400).json({
         success: false,
-        error: 'Invalid script ID provided' 
+        error: 'Script path is required'
       });
     }
 
-    // Check if script exists before attempting to run
-    const scripts = scriptService.getAllScripts();
-    const script = scripts.find(s => s.id === parseInt(id));
-    
-    if (!script) {
-      console.log('❌ Script not found with ID:', id);
-      return res.status(404).json({ 
+    // Check if file exists
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(400).json({
         success: false,
-        error: `Script with ID ${id} not found` 
+        error: `Script file not found: ${scriptPath}`
       });
     }
 
-    console.log('📋 Script details:', {
-      name: script.name,
-      path: script.scriptPath,
-      args: script.arguments
-    });
+    // Build command
+    let command = `"${scriptPath}"`;
+    if (args && args.trim()) {
+      command += ` ${args.trim()}`;
+    }
 
-    // Set longer timeout for the response
-    res.setTimeout(600000); // 10 minutes
-
-    // Execute the script using the scriptService
-    console.log('🚀 Starting script execution...');
-    const result = await scriptService.runScript(id);
-    console.log('✅ Script execution completed:', {
-      success: result.success,
-      hasOutput: !!result.output,
-      outputLength: result.output?.length || 0
-    });
+    console.log('🖥️ Executing command:', command);
     
-    if (result.success) {
+    const startTime = Date.now();
+    
+    try {
+      // Execute the script
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: 300000, // 5 minutes
+        maxBuffer: 1024 * 1024 * 10, // 10MB
+        windowsHide: true,
+        shell: true,
+        cwd: path.dirname(scriptPath) // Run from script's directory
+      });
+
+      const executionTime = Date.now() - startTime;
+      
+      // Build output
+      let output = `Script: ${scriptPath}\n`;
+      output += `Arguments: ${args || 'None'}\n`;
+      output += `Execution time: ${executionTime}ms\n`;
+      output += `Started: ${new Date(startTime).toLocaleString()}\n\n`;
+      
+      if (stdout && stdout.trim()) {
+        output += `STDOUT:\n${stdout.trim()}\n\n`;
+      }
+      
+      if (stderr && stderr.trim()) {
+        output += `STDERR:\n${stderr.trim()}\n\n`;
+      }
+      
+      if (!stdout && !stderr) {
+        output += 'Script completed successfully (no output)\n';
+      }
+      
+      output += `--- Execution completed with exit code 0 ---`;
+
       console.log('✅ Script executed successfully');
-      res.json({ 
-        success: true, 
-        output: result.output || 'Script completed successfully (no output)',
-        executedAt: result.executedAt,
-        executionTime: result.executionTime
+      
+      res.json({
+        success: true,
+        output: output,
+        executionTime: executionTime,
+        executedAt: new Date().toISOString()
       });
-    } else {
-      console.log('❌ Script execution failed:', result.error);
-      res.status(400).json({ 
+
+    } catch (execError) {
+      const executionTime = Date.now() - startTime;
+      console.error('❌ Script execution failed:', execError);
+
+      // Build error output
+      let errorOutput = `Script: ${scriptPath}\n`;
+      errorOutput += `Arguments: ${args || 'None'}\n`;
+      errorOutput += `Execution time: ${executionTime}ms\n`;
+      errorOutput += `Started: ${new Date(startTime).toLocaleString()}\n\n`;
+      errorOutput += `ERROR: ${execError.message}\n`;
+      
+      if (execError.code) {
+        errorOutput += `Exit code: ${execError.code}\n`;
+      }
+      
+      if (execError.stdout && execError.stdout.trim()) {
+        errorOutput += `\nSTDOUT:\n${execError.stdout.trim()}\n`;
+      }
+      
+      if (execError.stderr && execError.stderr.trim()) {
+        errorOutput += `\nSTDERR:\n${execError.stderr.trim()}\n`;
+      }
+
+      // Handle specific errors
+      if (execError.code === 'ENOENT') {
+        errorOutput += `\n💡 File not found. Check if the path is correct.`;
+      } else if (execError.code === 'EACCES') {
+        errorOutput += `\n💡 Permission denied. Check file permissions.`;
+      } else if (execError.signal === 'SIGTERM') {
+        errorOutput += `\n💡 Script was terminated (timeout).`;
+      }
+
+      errorOutput += `\n--- Execution failed ---`;
+
+      res.status(400).json({
         success: false,
-        error: result.error || 'Script execution failed',
-        output: result.output || '',
-        executedAt: result.executedAt,
-        executionTime: result.executionTime
+        error: execError.message,
+        output: errorOutput,
+        executionTime: executionTime,
+        executedAt: new Date().toISOString()
       });
     }
+
   } catch (error) {
     console.error('💥 Script execution route error:', error);
-    console.error('Error stack:', error.stack);
-    
-    // Check if response was already sent
-    if (!res.headersSent) {
-      res.status(500).json({ 
-        success: false, 
-        error: `Server error: ${error.message}`,
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
-    }
+    res.status(500).json({
+      success: false,
+      error: `Server error: ${error.message}`
+    });
   }
 });
 
-// Enhanced Script Service with Better Error Handling
-// Replace your runScript method in backend/services/scriptService.js
+// SCRIPT PATH VALIDATION ROUTE
+app.post('/api/validate-script-path', (req, res) => {
+  try {
+    const { scriptPath } = req.body;
+    
+    if (!scriptPath) {
+      return res.json({
+        valid: false,
+        error: 'Script path is required'
+      });
+    }
 
+    // Check if file exists
+    if (!fs.existsSync(scriptPath)) {
+      return res.json({
+        valid: false,
+        error: `File not found: ${scriptPath}`
+      });
+    }
 
+    // Check if it's a file
+    const stats = fs.statSync(scriptPath);
+    if (!stats.isFile()) {
+      return res.json({
+        valid: false,
+        error: 'Path must point to a file'
+      });
+    }
 
+    // Check file extension
+    const ext = path.extname(scriptPath).toLowerCase();
+    if (!['.bat', '.cmd', '.exe', '.ps1'].includes(ext)) {
+      return res.json({
+        valid: true,
+        warning: `Unusual file extension: ${ext}. Make sure this is executable.`
+      });
+    }
+
+    res.json({
+      valid: true,
+      message: 'Script path is valid'
+    });
+
+  } catch (error) {
+    res.json({
+      valid: false,
+      error: `Error validating path: ${error.message}`
+    });
+  }
+});
 
 
 // Error handling middleware

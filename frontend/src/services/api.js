@@ -304,132 +304,51 @@ export const thresholdAPI = {
 };
 
 
-
-// Script API functions 
-export const scriptAPI = {
-  getAllScripts: async () => {
+export const simpleScriptAPI = {
+  // Execute a script
+  executeScript: async (scriptData) => {
     try {
-      console.log('🔍 Fetching all scripts...');
-      const response = await api.get('/api/scripts');
-      console.log('✅ Scripts loaded successfully:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to load scripts:', error);
-      throw new Error(`Failed to load scripts: ${error.response?.data?.error || error.message}`);
-    }
-  },
-
-  addScript: async (scriptData) => {
-    try {
-      console.log('📝 Adding script:', scriptData);
-      const response = await api.post('/api/scripts', scriptData);
-      console.log('✅ Script added successfully:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to add script:', error);
-      throw new Error(`Failed to add script: ${error.response?.data?.error || error.message}`);
-    }
-  },
-
-  updateScript: async (id, scriptData) => {
-    try {
-      console.log('🔄 Updating script:', id, scriptData);
-      const response = await api.put(`/api/scripts/${id}`, scriptData);
-      console.log('✅ Script updated successfully:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to update script:', error);
-      throw new Error(`Failed to update script: ${error.response?.data?.error || error.message}`);
-    }
-  },
-
-  deleteScript: async (id) => {
-    try {
-      console.log('🗑️ Deleting script:', id);
-      const response = await api.delete(`/api/scripts/${id}`);
-      console.log('✅ Script deleted successfully:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to delete script:', error);
-      throw new Error(`Failed to delete script: ${error.response?.data?.error || error.message}`);
-    }
-  },
-
-  // ENHANCED RUN SCRIPT WITH BETTER ERROR HANDLING
-  runScript: async (id) => {
-    try {
-      console.log('🏃 Running script with ID:', id);
-      console.log('⏰ Starting script execution at:', new Date().toISOString());
-      
-      // Increased timeout for script execution (10 minutes)
-      const response = await api.post(`/api/scripts/${id}/run`, {}, {
-        timeout: 600000, // 10 minutes timeout
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      console.log('🏃 Executing script:', scriptData);
+      const response = await api.post('/api/execute-script', {
+        scriptPath: scriptData.scriptPath,
+        arguments: scriptData.arguments,
+        name: scriptData.name
+      }, {
+        timeout: 300000 // 5 minutes timeout
       });
       
       console.log('✅ Script execution completed:', response.data);
-      console.log('⏰ Completed at:', new Date().toISOString());
-      
       return response.data;
     } catch (error) {
       console.error('❌ Script execution failed:', error);
       
-      // Better error handling for different types of network errors
+      // Handle different error types
       if (error.code === 'ECONNABORTED') {
-        throw new Error('Script execution timed out. The script may be taking longer than expected.');
-      } else if (error.code === 'ECONNREFUSED') {
-        throw new Error('Cannot connect to server. Please check if the backend is running.');
-      } else if (error.code === 'ENETUNREACH') {
-        throw new Error('Network unreachable. Please check your connection.');
-      } else if (error.response?.status === 500) {
-        throw new Error(`Server error: ${error.response?.data?.error || 'Internal server error'}`);
-      } else if (error.response?.status === 400) {
-        throw new Error(`Script error: ${error.response?.data?.error || 'Bad request'}`);
-      } else if (error.response?.status === 404) {
-        throw new Error('Script not found. Please refresh and try again.');
+        throw new Error('Script execution timed out');
+      } else if (error.response?.data) {
+        // Server returned an error response
+        throw new Error(error.response.data.error || 'Script execution failed');
       } else {
-        throw new Error(`Network error: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+        throw new Error(`Network error: ${error.message}`);
       }
     }
   },
 
-  getScriptHistory: async (id) => {
+  // Validate script path
+  validatePath: async (scriptPath) => {
     try {
-      console.log('📊 Getting script history for ID:', id);
-      const response = await api.get(`/api/scripts/${id}/history`);
-      console.log('✅ Script history loaded:', response.data);
+      const response = await api.post('/api/validate-script-path', {
+        scriptPath: scriptPath
+      });
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to get script history:', error);
-      throw new Error(`Failed to get script history: ${error.response?.data?.error || error.message}`);
-    }
-  },
-
-  validatePath: async (data) => {
-    try {
-      console.log('🔍 Validating script path:', data.scriptPath);
-      const response = await api.post('/api/scripts/validate-path', data);
-      console.log('✅ Path validation result:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to validate path:', error);
-      return { valid: false, error: 'Failed to validate path' };
-    }
-  },
-
-  // NEW: Test connection to backend
-  testConnection: async () => {
-    try {
-      console.log('🔗 Testing backend connection...');
-      const response = await api.get('/api/health');
-      console.log('✅ Backend connection successful:', response.data);
-      return { success: true, data: response.data };
-    } catch (error) {
-      console.error('❌ Backend connection failed:', error);
-      return { success: false, error: error.message };
+      console.error('Path validation error:', error);
+      return {
+        valid: false,
+        error: 'Failed to validate path'
+      };
     }
   }
 };
+
 export default api;

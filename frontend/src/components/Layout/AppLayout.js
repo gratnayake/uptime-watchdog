@@ -17,7 +17,7 @@ import UrlMonitoring from '../Urls/UrlMonitoring';
 import KubernetesConfig from '../Kubernetes/KubernetesConfig';
 import { useMode } from '../../contexts/ModeContext'; 
 import DbSizeThreshold from '../Thresholds/DbSizeThreshold';
-import ScriptManagement from '../Scripts/ScriptManagement';
+import SimpleScriptManager from '../Scripts/SimpleScriptManager';
 
 
 const { Content, Footer } = Layout;
@@ -72,13 +72,13 @@ const AppLayout = () => {
       case 'kubernetes':
         return <KubernetesMonitor />;
       case 'url-monitoring':
-        return <UrlMonitoring />;
-      case 'script-management':  
-        return <ScriptManagement />;
+        return <UrlMonitoring />;      
       case 'kubernetes-config':
         return isAdmin ? <KubernetesConfig /> : <RealtimeDashboard />;
       case 'threshold-config':
         return isAdmin ? <DbSizeThreshold /> : <RealtimeDashboard />;
+      case 'script-manager':
+        return <SimpleScriptManager />;
       default:
         return <RealtimeDashboard />;
     }
@@ -105,9 +105,7 @@ const AppLayout = () => {
       case 'kubernetes':
         return 'Kubernetes Monitoring';
       case 'url-monitoring':
-        return 'URL Monitoring';
-      case 'script-management':  
-        return 'Script Management'  
+        return 'URL Monitoring';      
       case 'kubernetes-config':
         return 'Kubernetes Configuration';
       default:

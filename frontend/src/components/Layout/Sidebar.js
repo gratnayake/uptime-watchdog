@@ -33,6 +33,11 @@ const Sidebar = ({ currentPage, onPageChange }) => {
       icon: <GlobalOutlined />,
       label: 'URL Monitoring',
     },    
+    {
+      key: 'script-manager',
+      icon: <CodeOutlined />,
+      label: 'Script Manager',
+    },
   ];
 
   const serverModeItems = [
@@ -103,12 +108,7 @@ const Sidebar = ({ currentPage, onPageChange }) => {
         key: 'kubernetes-config',
         icon: <SettingOutlined />,
         label: 'Kubernetes Config',
-      },
-      {
-        key: 'script-management',  
-        icon: <CodeOutlined  />,
-        label: 'Script Management',
-      },
+      },    
     );
   }
 
