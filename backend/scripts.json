@@ -1,0 +1,49 @@
+{
+  "scripts": [
+    {
+      "id": 1,
+      "name": "System Information",
+      "description": "Display basic system information",
+      "scriptPath": "systeminfo",
+      "arguments": "",
+      "type": "system",
+      "lastRunAt": null,
+      "lastStatus": null,
+      "createdAt": "2025-07-03T22:15:24.451Z"
+    },
+    {
+      "id": 2,
+      "name": "Directory Listing",
+      "description": "List current directory contents",
+      "scriptPath": "dir",
+      "arguments": "/w",
+      "type": "system",
+      "lastRunAt": null,
+      "lastStatus": null,
+      "createdAt": "2025-07-03T22:15:24.451Z"
+    },
+    {
+      "id": 3,
+      "name": "Oracle Database Shutdown",
+      "description": "Shutdown Oracle Database with IMMEDIATE mode",
+      "scriptPath": "ORACLE_DB_SHUTDOWN",
+      "arguments": "immediate",
+      "type": "database",
+      "lastRunAt": null,
+      "lastStatus": null,
+      "createdAt": "2025-07-03T22:15:24.451Z"
+    },
+    {
+      "id": 4,
+      "name": "Oracle Database Startup",
+      "description": "Startup Oracle Database",
+      "scriptPath": "ORACLE_DB_STARTUP",
+      "arguments": "open",
+      "type": "database",
+      "lastRunAt": null,
+      "lastStatus": null,
+      "createdAt": "2025-07-03T22:15:24.451Z"
+    }
+  ],
+  "lastUpdated": "2025-07-03T22:15:24.451Z"
+}
