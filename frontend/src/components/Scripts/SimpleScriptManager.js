@@ -1,5 +1,5 @@
-// Simple Script Manager Component
-// File: frontend/src/components/Scripts/SimpleScriptManager.js
+// Add this component to your SimpleScriptManager
+// Update your SimpleScriptManager.js to include Kubernetes status
 
 import React, { useState, useEffect } from 'react';
 import { 
@@ -27,11 +27,12 @@ import {
   FileTextOutlined,
   CodeOutlined,
   FolderOpenOutlined,
-  SettingOutlined
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
-const { TextArea } = Input;
 const { Option } = Select;
 
 const SimpleScriptManager = () => {
@@ -40,6 +41,7 @@ const SimpleScriptManager = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingScript, setEditingScript] = useState(null);
   const [outputModal, setOutputModal] = useState({ visible: false, script: null, output: '', loading: false });
+  const [kubeStatus, setKubeStatus] = useState(null); // New state for Kubernetes status
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -51,18 +53,78 @@ const SimpleScriptManager = () => {
   const commonArguments = [
     { label: 'Help', value: '--help', description: 'Show help information' },
     { label: 'Version', value: '--version', description: 'Show version information' },
-    { label: 'Deploy Dev', value: 'deploy --env=dev', description: 'Deploy to development environment' },
-    { label: 'Deploy Prod', value: 'deploy --env=prod', description: 'Deploy to production environment' },
-    { label: 'Status Check', value: 'status --all', description: 'Check status of all components' },
-    { label: 'List Services', value: 'list --services', description: 'List all available services' },
-    { label: 'Config Validate', value: 'config --validate', description: 'Validate configuration' }
+    { label: 'Stop Namespace', value: 'stop --namespace "tsutst"', description: 'Stop deployments in namespace' },
+    { label: 'Start Namespace', value: 'start --namespace "tsutst"', description: 'Start deployments in namespace' },
+    { label: 'Status Check', value: 'status --namespace "tsutst"', description: 'Check status of namespace' },
+    { label: 'List Deployments', value: 'list --namespace "tsutst"', description: 'List all deployments' },
+    { label: 'Deploy', value: 'deploy --namespace "tsutst"', description: 'Deploy to namespace' }
   ];
 
   useEffect(() => {
     loadScripts();
+    checkKubernetesConfig(); // Check Kubernetes config on load
   }, []);
 
-  // Load scripts from localStorage (simple storage)
+  // Check Kubernetes configuration status
+  const checkKubernetesConfig = async () => {
+    try {
+      const response = await fetch('http://localhost:5001/api/kubernetes-script-config');
+      const data = await response.json();
+      setKubeStatus(data);
+    } catch (error) {
+      console.error('Failed to check Kubernetes config:', error);
+      setKubeStatus({
+        configured: false,
+        message: 'Unable to check Kubernetes configuration'
+      });
+    }
+  };
+
+  // Render Kubernetes status indicator
+  const renderKubernetesStatus = () => {
+    if (!kubeStatus) return null;
+
+    const getStatusProps = () => {
+      if (kubeStatus.configured && kubeStatus.kubeconfigExists) {
+        return {
+          type: "success",
+          icon: <CheckCircleOutlined />,
+          message: "Kubernetes Configuration Ready",
+          description: `KUBECONFIG will be automatically used from: ${kubeStatus.kubeconfigPath}`
+        };
+      } else if (kubeStatus.configured && !kubeStatus.kubeconfigExists) {
+        return {
+          type: "warning", 
+          icon: <ExclamationCircleOutlined />,
+          message: "Kubernetes Configuration Issue",
+          description: `KUBECONFIG file not found: ${kubeStatus.kubeconfigPath}`
+        };
+      } else {
+        return {
+          type: "info",
+          icon: <InfoCircleOutlined />,
+          message: "Kubernetes Not Configured",
+          description: "Scripts will run without KUBECONFIG. Configure in Kubernetes settings if needed."
+        };
+      }
+    };
+
+    const statusProps = getStatusProps();
+
+    return (
+      <Alert
+        {...statusProps}
+        showIcon
+        style={{ marginBottom: 16 }}
+        action={
+          <Button size="small" onClick={checkKubernetesConfig}>
+            Refresh
+          </Button>
+        }
+      />
+    );
+  };
+
   const loadScripts = () => {
     try {
       const saved = localStorage.getItem('simpleScripts');
@@ -74,7 +136,6 @@ const SimpleScriptManager = () => {
     }
   };
 
-  // Save scripts to localStorage
   const saveScripts = (scriptList) => {
     try {
       localStorage.setItem('simpleScripts', JSON.stringify(scriptList));
@@ -85,12 +146,10 @@ const SimpleScriptManager = () => {
     }
   };
 
-  // Execute script using real backend API
   const executeScript = async (script) => {
     setOutputModal({ visible: true, script, output: '', loading: true });
     
     try {
-      // Import the API (add this import at the top of the file)
       const { simpleScriptAPI } = await import('../../services/api');
       
       const result = await simpleScriptAPI.executeScript({
@@ -105,7 +164,6 @@ const SimpleScriptManager = () => {
         loading: false
       }));
       
-      // Update last run time
       const updatedScripts = scripts.map(s => 
         s.id === script.id 
           ? { ...s, lastRun: new Date().toISOString() }
@@ -113,7 +171,12 @@ const SimpleScriptManager = () => {
       );
       saveScripts(updatedScripts);
       
-      message.success('Script executed successfully');
+      // Show success message with Kubernetes info
+      if (result.kubeconfigUsed) {
+        message.success('Script executed successfully with KUBECONFIG');
+      } else {
+        message.success('Script executed successfully');
+      }
     } catch (error) {
       setOutputModal(prev => ({
         ...prev,
@@ -178,11 +241,6 @@ const SimpleScriptManager = () => {
     const updatedScripts = scripts.filter(s => s.id !== scriptId);
     saveScripts(updatedScripts);
     message.success('Script deleted successfully');
-  };
-
-  const handleSelectPath = () => {
-    // Since we can't actually browse files in a web app, we'll provide a helpful input
-    message.info('Please type the full path to your batch file (e.g., C:\\Scripts\\mtctl.bat)');
   };
 
   const handleQuickArgument = (value) => {
@@ -300,13 +358,8 @@ const SimpleScriptManager = () => {
           </Space>
         }
       >
-        <Alert
-          message="Simple Script Management"
-          description="Manage and execute your batch files with custom arguments. Perfect for your MTCTL script!"
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
+        {/* Kubernetes Status Indicator */}
+        {renderKubernetesStatus()}
 
         <Table
           columns={columns}
@@ -360,27 +413,15 @@ const SimpleScriptManager = () => {
           {/* Script Path */}
           <div>
             <Text strong>Script Path *</Text>
-            <Row gutter={8} style={{ marginTop: 4 }}>
-              <Col flex="auto">
-                <Input
-                  placeholder="C:\Scripts\mtctl.bat"
-                  value={form.scriptPath}
-                  onChange={(e) => setForm(prev => ({ ...prev, scriptPath: e.target.value }))}
-                  prefix={<FileTextOutlined />}
-                />
-              </Col>
-              <Col>
-                <Button
-                  icon={<FolderOpenOutlined />}
-                  onClick={handleSelectPath}
-                  title="Path Helper"
-                >
-                  Help
-                </Button>
-              </Col>
-            </Row>
+            <Input
+              placeholder="Full path to your MTCTL script"
+              value={form.scriptPath}
+              onChange={(e) => setForm(prev => ({ ...prev, scriptPath: e.target.value }))}
+              prefix={<FileTextOutlined />}
+              style={{ marginTop: 4 }}
+            />
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              Full path to your batch file (e.g., C:\Scripts\mtctl.bat)
+              e.g., E:\ifsroot\deliveries\...\mtctl.cmd
             </Text>
           </div>
 
@@ -411,41 +452,24 @@ const SimpleScriptManager = () => {
           <div>
             <Text strong>Arguments</Text>
             <Input
-              placeholder="--help, deploy --env=dev, etc."
+              placeholder="--help, stop --namespace tsutst, etc."
               value={form.arguments}
               onChange={(e) => setForm(prev => ({ ...prev, arguments: e.target.value }))}
               style={{ marginTop: 4 }}
             />
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              Command line arguments to pass to your script
-            </Text>
           </div>
 
-          {/* Example */}
+          {/* Information Alert */}
           <Alert
-            message="Example Setup for Your MTCTL Script"
-            description={
-              <div>
-                <Text strong>Name:</Text> MTCTL Help
-                <br />
-                <Text strong>Path:</Text> C:\Scripts\mtctl.bat
-                <br />
-                <Text strong>Arguments:</Text> --help
-                <br />
-                <br />
-                <Text type="secondary">
-                  This will execute: C:\Scripts\mtctl.bat --help
-                </Text>
-              </div>
-            }
-            type="success"
-            showIcon={false}
-            style={{ fontSize: '12px' }}
+            message="Automatic Kubernetes Integration"
+            description="Your KUBECONFIG will be automatically applied from your Kubernetes configuration settings. No need to set environment variables manually."
+            type="info"
+            showIcon
           />
         </Space>
       </Modal>
 
-      {/* Script Output Modal */}
+      {/* Script Output Modal - same as before */}
       <Modal
         title={
           <Space>

@@ -28,6 +28,25 @@ const userService = require('./services/userService');
 const dbConfigService = require('./services/dbConfigService');
 const realOracleService = require('./services/realOracleService');
 const execAsync = util.promisify(exec);
+
+
+// Function to load Kubernetes config
+const loadKubernetesConfig = () => {
+  try {
+    const configPath = path.join(__dirname, 'data', 'kubernetes-config.json');
+    if (fs.existsSync(configPath)) {
+      const configData = fs.readFileSync(configPath, 'utf8');
+      const config = JSON.parse(configData);
+      return config;
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load Kubernetes config:', error);
+    return null;
+  }
+};
+
+
 // Basic route
 app.get('/', (req, res) => {
   res.json({ 
@@ -969,6 +988,8 @@ app.post('/api/thresholds/db-size', (req, res) => {
   }
 });
 
+
+// ENHANCED SCRIPT EXECUTION ROUTE WITH KUBECONFIG SUPPORT
 app.post('/api/execute-script', async (req, res) => {
   try {
     const { scriptPath, arguments: args, name } = req.body;
@@ -991,6 +1012,22 @@ app.post('/api/execute-script', async (req, res) => {
       });
     }
 
+    // Load Kubernetes configuration
+    const kubeConfig = loadKubernetesConfig();
+    
+    // Prepare environment variables
+    const env = { ...process.env }; // Start with system environment
+    
+    // Add KUBECONFIG if configured and file exists
+    if (kubeConfig && kubeConfig.kubeconfigPath && kubeConfig.isConfigured) {
+      if (fs.existsSync(kubeConfig.kubeconfigPath)) {
+        env.KUBECONFIG = kubeConfig.kubeconfigPath;
+        console.log(`🔧 Using KUBECONFIG: ${kubeConfig.kubeconfigPath}`);
+      } else {
+        console.warn(`⚠️ KUBECONFIG file not found: ${kubeConfig.kubeconfigPath}`);
+      }
+    }
+
     // Build command
     let command = `"${scriptPath}"`;
     if (args && args.trim()) {
@@ -998,26 +1035,34 @@ app.post('/api/execute-script', async (req, res) => {
     }
 
     console.log('🖥️ Executing command:', command);
+    console.log('🌍 Environment variables:', Object.keys(env).filter(key => key.includes('KUBE')));
     
     const startTime = Date.now();
     
     try {
-      // Execute the script using execAsync
+      // Execute the script with enhanced environment
       const { stdout, stderr } = await execAsync(command, {
         timeout: 300000, // 5 minutes
         maxBuffer: 1024 * 1024 * 10, // 10MB
         windowsHide: true,
         shell: true,
-        cwd: path.dirname(scriptPath) // Run from script's directory
+        cwd: path.dirname(scriptPath), // Run from script's directory
+        env: env // Use enhanced environment with KUBECONFIG
       });
 
       const executionTime = Date.now() - startTime;
       
-      // Build output
+      // Build output with environment info
       let output = `Script: ${scriptPath}\n`;
       output += `Arguments: ${args || 'None'}\n`;
       output += `Execution time: ${executionTime}ms\n`;
-      output += `Started: ${new Date(startTime).toLocaleString()}\n\n`;
+      output += `Started: ${new Date(startTime).toLocaleString()}\n`;
+      
+      // Show environment info
+      if (env.KUBECONFIG) {
+        output += `KUBECONFIG: ${env.KUBECONFIG}\n`;
+      }
+      output += `\n`;
       
       if (stdout && stdout.trim()) {
         output += `STDOUT:\n${stdout.trim()}\n\n`;
@@ -1039,19 +1084,24 @@ app.post('/api/execute-script', async (req, res) => {
         success: true,
         output: output,
         executionTime: executionTime,
-        executedAt: new Date().toISOString()
+        executedAt: new Date().toISOString(),
+        kubeconfigUsed: !!env.KUBECONFIG
       });
 
     } catch (execError) {
       const executionTime = Date.now() - startTime;
       console.error('❌ Script execution failed:', execError);
 
-      // Build error output
+      // Build error output with environment info
       let errorOutput = `Script: ${scriptPath}\n`;
       errorOutput += `Arguments: ${args || 'None'}\n`;
       errorOutput += `Execution time: ${executionTime}ms\n`;
-      errorOutput += `Started: ${new Date(startTime).toLocaleString()}\n\n`;
-      errorOutput += `ERROR: ${execError.message}\n`;
+      errorOutput += `Started: ${new Date(startTime).toLocaleString()}\n`;
+      
+      if (env.KUBECONFIG) {
+        errorOutput += `KUBECONFIG: ${env.KUBECONFIG}\n`;
+      }
+      errorOutput += `\nERROR: ${execError.message}\n`;
       
       if (execError.code) {
         errorOutput += `Exit code: ${execError.code}\n`;
@@ -1065,13 +1115,21 @@ app.post('/api/execute-script', async (req, res) => {
         errorOutput += `\nSTDERR:\n${execError.stderr.trim()}\n`;
       }
 
-      // Handle specific errors
+      // Handle specific errors with suggestions
       if (execError.code === 'ENOENT') {
         errorOutput += `\n💡 File not found. Check if the path is correct.`;
       } else if (execError.code === 'EACCES') {
         errorOutput += `\n💡 Permission denied. Check file permissions.`;
       } else if (execError.signal === 'SIGTERM') {
         errorOutput += `\n💡 Script was terminated (timeout).`;
+      } else if (execError.stderr && execError.stderr.includes('certificate')) {
+        errorOutput += `\n💡 Certificate error detected.`;
+        if (!env.KUBECONFIG) {
+          errorOutput += `\n💡 Try configuring KUBECONFIG in Kubernetes settings.`;
+        }
+      } else if (execError.stderr && execError.stderr.includes('Unable to connect')) {
+        errorOutput += `\n💡 Connection error detected.`;
+        errorOutput += `\n💡 Check if your Kubernetes cluster is accessible.`;
       }
 
       errorOutput += `\n--- Execution failed ---`;
@@ -1081,7 +1139,8 @@ app.post('/api/execute-script', async (req, res) => {
         error: execError.message,
         output: errorOutput,
         executionTime: executionTime,
-        executedAt: new Date().toISOString()
+        executedAt: new Date().toISOString(),
+        kubeconfigUsed: !!env.KUBECONFIG
       });
     }
 
@@ -1090,6 +1149,37 @@ app.post('/api/execute-script', async (req, res) => {
     res.status(500).json({
       success: false,
       error: `Server error: ${error.message}`
+    });
+  }
+});
+
+// Optional: Add route to check current Kubernetes config
+app.get('/api/kubernetes-script-config', (req, res) => {
+  try {
+    const kubeConfig = loadKubernetesConfig();
+    
+    if (!kubeConfig) {
+      return res.json({
+        configured: false,
+        message: 'No Kubernetes configuration found'
+      });
+    }
+
+    const kubeconfigExists = kubeConfig.kubeconfigPath ? 
+      fs.existsSync(kubeConfig.kubeconfigPath) : false;
+
+    res.json({
+      configured: kubeConfig.isConfigured,
+      kubeconfigPath: kubeConfig.kubeconfigPath,
+      kubeconfigExists: kubeconfigExists,
+      message: kubeconfigExists ? 
+        'KUBECONFIG will be automatically used for scripts' : 
+        'KUBECONFIG file not found - scripts may fail'
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      error: `Failed to check Kubernetes config: ${error.message}`
     });
   }
 });
